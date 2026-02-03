@@ -1,15 +1,4 @@
 {
-  "indexes": [
-    {
-      "collectionGroup": "cache",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "expiresAt",
-          "order": "ASCENDING"
-        }
-      ]
-    }
-  ],
+  "indexes": [],
   "fieldOverrides": []
 }

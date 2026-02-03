@@ -15,7 +15,7 @@ const gemini = new GeminiService();
 export const analyzeInventoryJob = onSchedule({
   schedule: 'every 6 hours',  // 00:00, 06:00, 12:00, 18:00
   timeZone: 'America/Mazatlan',
-  secrets: ['LIGHTSPEED_PERSONAL_TOKEN', 'GEMINI_API_KEY']
+  secrets: ['LIGHTSPEED_PERSONAL_TOKEN']
 }, async (event) => {
   logger.info('Starting scheduled inventory analysis');
 
