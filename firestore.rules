@@ -1,0 +1,15 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Cache collection - solo acceso desde Functions
+    match /cache/{document=**} {
+      allow read, write: if false;
+    }
+
+    // Por defecto, denegar todo acceso
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

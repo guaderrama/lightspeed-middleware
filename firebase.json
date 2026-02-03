@@ -24,14 +24,74 @@
     ],
     "rewrites": [
       {
-        "source": "**",
+        "source": "/api/**",
         "function": "api"
+      },
+      {
+        "source": "/health",
+        "function": "api"
+      },
+      {
+        "source": "/reports/**",
+        "function": "api"
+      },
+      {
+        "source": "/analytics/**",
+        "function": "api"
+      },
+      {
+        "source": "/chat/**",
+        "function": "api"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/api/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(jpg|jpeg|gif|png|svg|webp)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=86400"
+          }
+        ]
       }
     ]
   },
   "emulators": {
     "functions": {
       "port": 5002
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
     }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   }
 }

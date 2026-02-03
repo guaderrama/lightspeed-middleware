@@ -215,9 +215,9 @@ export class LightspeedClient {
       for (const item of data.data) {
         if (item.type === "Sale" && item.Sale && item.Sale.SaleLines) {
           for (const line of item.Sale.SaleLines) {
-            if (line.itemID && line.quantity > 0) { // Only count positive quantities
-              const productId = line.itemID;
-              const productName = line.Item ? line.Item.description : 'Unknown';
+            if (line.product_id && line.quantity > 0) { // Only count positive quantities
+              const productId = line.product_id;
+              const productName = line.product_id; // Placeholder for now
               if (productSales[productId]) {
                 productSales[productId].quantity += line.quantity;
               } else {
