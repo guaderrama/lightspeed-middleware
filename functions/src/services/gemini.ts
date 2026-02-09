@@ -9,8 +9,8 @@ export class GeminiService {
   constructor(apiKey?: string) {
     const key = apiKey || process.env.GEMINI_API_KEY || '';
     this.genAI = new GoogleGenerativeAI(key);
-    // Gemini 3 Flash - más rápido y económico
-    this.model = this.genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
+    // Gemini 2.0 Flash - más rápido y económico
+    this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
   }
 
   /**
@@ -145,15 +145,15 @@ Respuesta:`;
 
   /**
    * Calcula el costo de la llamada a Gemini API
-   * Gemini 3 Flash pricing (Enero 2026):
+   * Gemini 2.0 Flash pricing (Enero 2025):
    * - Free tier: 1500 requests/día GRATIS
-   * - Paid: $0.50 per 1M input tokens, $3.00 per 1M output tokens
+   * - Paid: $0.075 per 1M input tokens, $0.30 per 1M output tokens
    */
   private calculateCost(inputTokens: number, outputTokens: number): number {
     // Si estás en el tier gratuito (< 1500 req/día), el costo es $0
     // Para calcular el costo si superas el tier gratuito:
-    const inputCost = (inputTokens / 1_000_000) * 0.50;
-    const outputCost = (outputTokens / 1_000_000) * 3.00;
+    const inputCost = (inputTokens / 1_000_000) * 0.075;
+    const outputCost = (outputTokens / 1_000_000) * 0.30;
     return inputCost + outputCost;
   }
 
