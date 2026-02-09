@@ -14,6 +14,7 @@ export { analyzeInventoryJob } from "./jobs/analyze-inventory";
 const secrets = [
   "LIGHTSPEED_PERSONAL_TOKEN",
   "BRIDGE_API_KEY",
+  "GEMINI_API_KEY",
 ];
 
 // Initialize Express app

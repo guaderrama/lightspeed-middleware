@@ -66,7 +66,7 @@ class ApiClient {
   }
 
   async chat(question: string) {
-    return this.request<{ answer: string; cost: number }>('/chat', {
+    return this.request<{ answer: string; cost: number }>('/chat/ask', {
       method: 'POST',
       body: JSON.stringify({ question }),
     });
