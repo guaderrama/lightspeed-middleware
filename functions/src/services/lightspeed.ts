@@ -1,4 +1,4 @@
-import fetch from "node-fetch";
+// Using Node.js 22 native fetch (no import needed)
 import * as functions from "firebase-functions";
 
 interface SalesSummary {
