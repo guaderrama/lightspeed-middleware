@@ -20,6 +20,31 @@ const secrets = [
 const app = express();
 app.use(express.json());
 
+// CORS middleware
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const allowedOrigins = [
+    'https://lightspeed-middleware.web.app',
+    'https://lightspeed-middleware.firebaseapp.com',
+    'http://localhost:5173', // Dev
+  ];
+
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Correlation-ID');
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
+  next();
+});
+
 // Authentication middleware
 const requireApiKey = (
   req: express.Request,
