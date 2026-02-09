@@ -240,4 +240,68 @@ export class LightspeedClient {
 
     return sortedProducts.slice(0, limit);
   }
+
+  /**
+   * Get daily sales breakdown for a given period
+   * Returns sales amount grouped by date
+   */
+  public async getDailySales(
+    dateFrom: string, // ISO string, assumed UTC
+    dateTo: string,   // ISO string, assumed UTC
+    outletId: string,
+  ): Promise<{ date: string; amount: number; tickets: number }[]> {
+    const dailySales: { [key: string]: { amount: number; tickets: number } } = {};
+    let currentPage = 0;
+    const pageSize = 200;
+    let hasMore = true;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales",
+        outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10),
+        date_to: dateTo.substring(0, 10),
+        offset: (currentPage * pageSize).toString(),
+        limit: pageSize.toString(),
+      });
+
+      const data: any = await this.makeRequest("/search", params);
+
+      if (!data || !data.data || !Array.isArray(data.data) || data.data.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const item of data.data) {
+        if (item.type === "Sale" && item.Sale) {
+          const saleDate = item.Sale.completed_at || item.Sale.created_at;
+          if (saleDate) {
+            const date = saleDate.substring(0, 10); // Extract YYYY-MM-DD
+            const amount = parseFloat(item.Sale.total || 0);
+
+            if (!dailySales[date]) {
+              dailySales[date] = { amount: 0, tickets: 0 };
+            }
+
+            dailySales[date].amount += amount;
+            dailySales[date].tickets += 1;
+          }
+        }
+      }
+
+      currentPage++;
+      if (data.data.length < pageSize) {
+        hasMore = false;
+      }
+    }
+
+    // Convert to array and sort by date
+    return Object.entries(dailySales)
+      .map(([date, data]) => ({
+        date,
+        amount: parseFloat(data.amount.toFixed(2)),
+        tickets: data.tickets,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
 }

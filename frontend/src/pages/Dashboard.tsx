@@ -1,16 +1,35 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
 import type { InventoryAnalysis } from '@/types/inventory';
 import { AlertTriangle, TrendingUp, Package, RefreshCw, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
+import { PeriodSelector, getPeriodDates, type Period } from '@/components/PeriodSelector';
+import { MetricCardWithChange } from '@/components/MetricCardWithChange';
 
 export function Dashboard() {
+  const [period, setPeriod] = useState<Period>('month');
+  const periodDates = getPeriodDates(period);
+
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['inventory-status'],
     queryFn: async () => {
       const response = await apiClient.getInventoryStatus();
       return response.data as InventoryAnalysis;
+    },
+  });
+
+  // New query for sales comparison data
+  const { data: salesData, isLoading: salesLoading } = useQuery({
+    queryKey: ['sales-comparison', periodDates.from, periodDates.to],
+    queryFn: async () => {
+      const response = await apiClient.getSalesComparison({
+        date_from: periodDates.from,
+        date_to: periodDates.to,
+        outlet_id: '1', // Default outlet - TODO: Make this configurable
+      });
+      return response.data;
     },
   });
 
@@ -54,57 +73,147 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard de Inventario</h1>
-          <p className="text-gray-500 mt-1">
-            {meta.cached ? (
-              <>Datos en caché • Actualizado hace {Math.round((meta.cacheAge || 0) / 60)} min</>
-            ) : (
-              <>Datos en tiempo real</>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Dashboard de Inventario</h1>
+            <p className="text-gray-500 mt-1">
+              {meta.cached ? (
+                <>Datos en caché • Actualizado hace {Math.round((meta.cacheAge || 0) / 60)} min</>
+              ) : (
+                <>Datos en tiempo real</>
+              )}
+            </p>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={isFetching}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors',
+              isFetching && 'opacity-50 cursor-not-allowed'
             )}
-          </p>
+          >
+            <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
+            Actualizar
+          </button>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={isFetching}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors',
-            isFetching && 'opacity-50 cursor-not-allowed'
-          )}
-        >
-          <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
-          Actualizar
-        </button>
+
+        {/* Period Selector */}
+        <PeriodSelector value={period} onChange={setPeriod} />
       </div>
 
       {/* Métricas principales */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <MetricCard
-          title="Total Productos"
-          value={resumen.total_productos}
-          icon={Package}
-          color="blue"
-        />
-        <MetricCard
-          title="Alertas Críticas"
-          value={resumen.alertas_criticas}
-          icon={AlertTriangle}
-          color="red"
-        />
-        <MetricCard
-          title="Stock Saludable"
-          value={resumen.stock_saludable}
-          icon={TrendingUp}
-          color="green"
-        />
-        <MetricCard
-          title="Rotación Promedio"
-          value={`${resumen.rotacion_promedio.toFixed(1)}x`}
-          icon={RefreshCw}
-          color="purple"
-        />
+        {salesLoading ? (
+          <div className="col-span-4 text-center py-8 text-gray-500">
+            Cargando métricas de ventas...
+          </div>
+        ) : salesData ? (
+          <>
+            <MetricCardWithChange
+              title="Ventas del Período"
+              value={`$${salesData.current.summary.amount.toLocaleString()}`}
+              change={salesData.changes.amount}
+              icon={TrendingUp}
+              color="green"
+            />
+            <MetricCardWithChange
+              title="Transacciones"
+              value={salesData.current.summary.tickets.toLocaleString()}
+              change={salesData.changes.tickets}
+              icon={Package}
+              color="blue"
+            />
+            <MetricCardWithChange
+              title="Ticket Promedio"
+              value={`$${salesData.current.summary.avg_ticket.toLocaleString()}`}
+              change={salesData.changes.avg_ticket}
+              icon={RefreshCw}
+              color="purple"
+            />
+            <MetricCardWithChange
+              title="Alertas Críticas"
+              value={resumen.alertas_criticas}
+              icon={AlertTriangle}
+              color="red"
+            />
+          </>
+        ) : (
+          <>
+            <MetricCardWithChange
+              title="Total Productos"
+              value={resumen.total_productos}
+              icon={Package}
+              color="blue"
+            />
+            <MetricCardWithChange
+              title="Alertas Críticas"
+              value={resumen.alertas_criticas}
+              icon={AlertTriangle}
+              color="red"
+            />
+            <MetricCardWithChange
+              title="Stock Saludable"
+              value={resumen.stock_saludable}
+              icon={TrendingUp}
+              color="green"
+            />
+            <MetricCardWithChange
+              title="Rotación Promedio"
+              value={`${resumen.rotacion_promedio.toFixed(1)}x`}
+              icon={RefreshCw}
+              color="purple"
+            />
+          </>
+        )}
       </div>
+
+      {/* Sales Trend Graph */}
+      {salesData && salesData.daily_sales && salesData.daily_sales.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            📈 Tendencia de Ventas Diarias
+          </h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={salesData.daily_sales}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => {
+                  const date = new Date(value);
+                  return `${date.getDate()}/${date.getMonth() + 1}`;
+                }}
+              />
+              <YAxis
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => `$${value.toLocaleString()}`}
+              />
+              <Tooltip
+                formatter={(value: any) => [`$${value.toLocaleString()}`, 'Ventas']}
+                labelFormatter={(label) => {
+                  const date = new Date(label);
+                  return date.toLocaleDateString('es-MX', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric'
+                  });
+                }}
+              />
+              <Legend />
+              <Line
+                type="monotone"
+                dataKey="amount"
+                stroke="#10b981"
+                strokeWidth={2}
+                name="Ventas Diarias"
+                dot={{ fill: '#10b981', r: 4 }}
+                activeDot={{ r: 6 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {/* AI Insights */}
       {aiInsights && (

@@ -103,6 +103,20 @@ class ApiClient {
 
     return this.request<any>(`/reports/sales-top?${queryParams}`);
   }
+
+  async getSalesComparison(params: {
+    date_from: string;
+    date_to: string;
+    outlet_id: string;
+  }) {
+    const queryParams = new URLSearchParams({
+      date_from: params.date_from,
+      date_to: params.date_to,
+      outlet_id: params.outlet_id,
+    });
+
+    return this.request<any>(`/reports/sales-comparison?${queryParams}`);
+  }
 }
 
 export const apiClient = new ApiClient(API_BASE_URL, API_KEY);
