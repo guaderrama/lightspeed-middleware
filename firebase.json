@@ -16,6 +16,7 @@
     }
   ],
   "hosting": {
+    "site": "lightspeed-middleware",
     "public": "public",
     "ignore": [
       "firebase.json",
