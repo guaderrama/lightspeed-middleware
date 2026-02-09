@@ -1,66 +1,76 @@
 # Setup Instructions - Lightspeed Middleware v2.0
 
-## 📦 Instalación de Dependencias
+## Instalacion de Dependencias
 
 ```bash
 cd lightspeed-middleware/functions
 npm install
 ```
 
-Esto instalará:
-- `@anthropic-ai/sdk` - Claude API client
-- `zod` - Validación de schemas
+Esto instalara:
+- `@google/generative-ai` - Gemini API client
+- `zod` - Validacion de schemas
 - `firebase-admin` - Firebase SDK
 - `firebase-functions` - Cloud Functions
 - `express` - Framework web
+- `cors` - CORS middleware
 
-## 🔐 Configurar Secrets en Firebase
+## Configurar Secrets en Firebase
 
-### 1. CLAUDE_API_KEY (Nuevo)
+### 1. GEMINI_API_KEY
 
-Obtén tu API key de Claude en: https://console.anthropic.com
+Obten tu API key de Gemini (gratis) en: https://aistudio.google.com/apikey
 
 ```bash
-firebase functions:secrets:set CLAUDE_API_KEY
+firebase functions:secrets:set GEMINI_API_KEY
 # Pega tu API key cuando se solicite
 ```
 
-### 2. LIGHTSPEED_PERSONAL_TOKEN (Ya configurado)
+### 2. LIGHTSPEED_PERSONAL_TOKEN
 
 ```bash
 firebase functions:secrets:set LIGHTSPEED_PERSONAL_TOKEN
 ```
 
-### 3. BRIDGE_API_KEY (Ya configurado)
+### 3. BRIDGE_API_KEY
 
 ```bash
 firebase functions:secrets:set BRIDGE_API_KEY
 ```
 
-## 🏗️ Build del Proyecto
+Ver [SETUP-SECRETS.md](./SETUP-SECRETS.md) para instrucciones detalladas sobre cada secret.
+
+## Build del Proyecto
 
 ```bash
 cd functions
 npm run build
 ```
 
-## 🧪 Testing Local (Emulators)
+## Testing Local (Emulators)
 
 ```bash
-# Desde la raíz de lightspeed-middleware/
+# Desde la raiz de lightspeed-middleware/
 firebase emulators:start
 ```
 
-Esto iniciará:
+Esto iniciara:
 - Functions: http://localhost:5002
 - Hosting: http://localhost:5000
 - Firebase UI: http://localhost:4000
 - Firestore: puerto por defecto
 
-## 📝 Endpoints Nuevos
+## Endpoints
+
+### GET /health
+Health check (publico, no requiere autenticacion)
+
+```bash
+curl http://localhost:5002/YOUR_PROJECT/us-central1/api/health
+```
 
 ### GET /analytics/inventory-status
-Retorna análisis completo del inventario (con caché de 6h)
+Retorna analisis completo del inventario (con cache de 6h)
 
 ```bash
 curl -H "Authorization: Bearer YOUR_BRIDGE_API_KEY" \
@@ -68,7 +78,7 @@ curl -H "Authorization: Bearer YOUR_BRIDGE_API_KEY" \
 ```
 
 ### POST /analytics/refresh
-Fuerza recalcular el análisis (invalida caché)
+Fuerza recalcular el analisis (invalida cache)
 
 ```bash
 curl -X POST \
@@ -76,18 +86,50 @@ curl -X POST \
   http://localhost:5002/YOUR_PROJECT/us-central1/api/analytics/refresh
 ```
 
-### POST /chat/ask
-Chat conversacional con IA
+### GET /analytics/low-stock
+Retorna productos con stock bajo
+
+```bash
+curl -H "Authorization: Bearer YOUR_BRIDGE_API_KEY" \
+  http://localhost:5002/YOUR_PROJECT/us-central1/api/analytics/low-stock
+```
+
+### POST /chat
+Chat conversacional con IA (Gemini 2.0 Flash)
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer YOUR_BRIDGE_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"question": "¿Qué productos necesito reabastecer?"}' \
-  http://localhost:5002/YOUR_PROJECT/us-central1/api/chat/ask
+  -d '{"question": "Que productos necesito reabastecer?"}' \
+  http://localhost:5002/YOUR_PROJECT/us-central1/api/chat
 ```
 
-## 🚀 Deploy a Producción
+### GET /reports/sales-summary
+Resumen de ventas por periodo y outlet
+
+```bash
+curl -H "Authorization: Bearer YOUR_BRIDGE_API_KEY" \
+  "http://localhost:5002/YOUR_PROJECT/us-central1/api/reports/sales-summary?date_from=2025-10-01&date_to=2025-10-27&outlet_id=YOUR_OUTLET_ID"
+```
+
+### GET /reports/sales-top
+Top N productos mas vendidos
+
+```bash
+curl -H "Authorization: Bearer YOUR_BRIDGE_API_KEY" \
+  "http://localhost:5002/YOUR_PROJECT/us-central1/api/reports/sales-top?date_from=2025-10-01&date_to=2025-10-27&outlet_id=YOUR_OUTLET_ID&limit=10"
+```
+
+### GET /reports/outlets
+Lista todos los outlets (tiendas)
+
+```bash
+curl -H "Authorization: Bearer YOUR_BRIDGE_API_KEY" \
+  http://localhost:5002/YOUR_PROJECT/us-central1/api/reports/outlets
+```
+
+## Deploy a Produccion
 
 ```bash
 # Build
@@ -112,9 +154,9 @@ firebase deploy --only hosting
 firebase deploy --only firestore:rules
 ```
 
-## 📊 Background Job
+## Background Job
 
-El job `analyzeInventoryJob` se ejecuta automáticamente cada 6 horas:
+El job `analyzeInventoryJob` se ejecuta automaticamente cada 6 horas:
 - 00:00
 - 06:00
 - 12:00
@@ -122,38 +164,40 @@ El job `analyzeInventoryJob` se ejecuta automáticamente cada 6 horas:
 
 Zona horaria: America/Mazatlan
 
-## 🔍 Ver Logs
+Si detecta problemas criticos, llama a Gemini 2.0 Flash para analisis profundo.
+
+## Ver Logs
 
 ```bash
 # Logs en tiempo real
 firebase functions:log
 
-# Logs de una función específica
+# Logs de una funcion especifica
 firebase functions:log --only api
 
 # Logs del background job
 firebase functions:log --only analyzeInventoryJob
 ```
 
-## 💰 Costos Estimados
+## Costos Estimados
 
-### Claude API (Haiku)
-- Input: $1.00 per 1M tokens
-- Output: $5.00 per 1M tokens
-- **Costo por análisis:** ~$0.001-0.003
+### Gemini 2.0 Flash
+- Free tier: 1,500 requests/dia GRATIS
+- Paid tier: $0.50 per 1M input tokens, $3.00 per 1M output tokens
+- **Costo estimado mensual:** $0.00 (uso dentro del tier gratuito)
 
 ### Firebase
 - Functions: 2M invocations/mes gratis
 - Firestore: 1GB storage gratis
 - Hosting: 10GB storage + 360MB/day gratis
 
-**Total mensual estimado:** $10-20
+**Total mensual estimado:** $0-5
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### Error: "CLAUDE_API_KEY not configured"
+### Error: "GEMINI_API_KEY not configured"
 ```bash
-firebase functions:secrets:set CLAUDE_API_KEY
+firebase functions:secrets:set GEMINI_API_KEY
 ```
 
 ### Error: Build falla
@@ -165,18 +209,18 @@ npm run build
 ```
 
 ### Error: Firestore permission denied
-Verifica que `firestore.rules` esté desplegado:
+Verifica que `firestore.rules` este desplegado:
 ```bash
 firebase deploy --only firestore:rules
 ```
 
-## 📚 Estructura de Archivos
+## Estructura de Archivos
 
 ```
 lightspeed-middleware/
 ├── firebase.json                 # Config Firebase
 ├── firestore.rules              # Reglas Firestore
-├── firestore.indexes.json       # Índices Firestore
+├── firestore.indexes.json       # Indices Firestore
 ├── public/
 │   └── index.html               # Landing page
 └── functions/
@@ -185,20 +229,22 @@ lightspeed-middleware/
     └── src/
         ├── index.ts             # Main entry point
         ├── services/
-        │   ├── claude.ts        # Claude AI integration
+        │   ├── gemini.ts        # Gemini AI integration
         │   ├── analytics.ts     # Inventory calculations
         │   ├── cache.ts         # Firestore cache
         │   └── lightspeed.ts    # Lightspeed API client
         ├── routes/
         │   ├── analytics.ts     # /analytics/* endpoints
-        │   └── chat.ts          # /chat/* endpoints
+        │   ├── chat.ts          # /chat endpoint
+        │   └── reports.ts       # /reports/* endpoints
         ├── jobs/
         │   └── analyze-inventory.ts  # Scheduled job
         └── types/
-            └── analytics.ts     # TypeScript types
+            ├── analytics.ts     # TypeScript types
+            └── express.ts       # Express type extensions
 ```
 
-## ✅ Verificación Post-Deploy
+## Verificacion Post-Deploy
 
 1. Health check:
 ```bash
@@ -211,5 +257,5 @@ curl -H "Authorization: Bearer YOUR_KEY" \
   https://YOUR_PROJECT.web.app/analytics/inventory-status
 ```
 
-3. Verificar que el job está programado:
-Ve a Firebase Console → Functions → Scheduled functions
+3. Verificar que el job esta programado:
+Ve a Firebase Console -> Functions -> Scheduled functions
