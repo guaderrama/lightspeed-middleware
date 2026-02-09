@@ -10,6 +10,13 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    host: true,
+    allowedHosts: [
+      'code.ariai.cloud',
+      '.ariai.cloud',
+    ],
+  },
   build: {
     outDir: '../public',
     emptyOutDir: true,
