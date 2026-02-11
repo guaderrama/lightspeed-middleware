@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "shadcn": {
+      "disabled": false,
+      "autoApprove": ["install_component", "search_components"],
+      "command": "npx",
+      "args": ["-y", "shadcn@latest", "mcp"]
+    }
+  }
+}
