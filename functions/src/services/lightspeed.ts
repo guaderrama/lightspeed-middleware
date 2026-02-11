@@ -29,9 +29,41 @@ interface RetailerDetails {
 export class LightspeedClient {
   private readonly baseUrl: string = "https://ivanguaderrama.retail.lightspeed.app/api/2.0";
   private readonly accessToken: string;
+  private readonly defaultTimezone: string = "America/Mazatlan";
 
   constructor(accessToken: string) {
     this.accessToken = accessToken;
+  }
+
+  /**
+   * Converts a UTC date string from Lightspeed API to a Date object
+   * representing the local time in the store's timezone.
+   * Lightspeed API returns ALL dates in UTC.
+   */
+  private toLocalDate(utcDateStr: string, timezone?: string): Date {
+    const tz = timezone || this.defaultTimezone;
+    const utcDate = new Date(utcDateStr);
+    const localStr = utcDate.toLocaleString('en-US', { timeZone: tz });
+    return new Date(localStr);
+  }
+
+  /**
+   * Formats a local Date as YYYY-MM-DD string
+   */
+  private formatLocalDate(localDate: Date): string {
+    const year = localDate.getFullYear();
+    const month = String(localDate.getMonth() + 1).padStart(2, '0');
+    const day = String(localDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  /**
+   * Formats a local Date as YYYY-MM string
+   */
+  private formatLocalMonth(localDate: Date): string {
+    const year = localDate.getFullYear();
+    const month = String(localDate.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
   }
 
   private async makeRequest<T>(endpoint: string, params?: URLSearchParams): Promise<T> {
@@ -290,7 +322,8 @@ export class LightspeedClient {
         if (sale.status === "CLOSED") {
           const saleDate = sale.sale_date || sale.created_at;
           if (saleDate) {
-            const date = saleDate.substring(0, 10);
+            const localDate = this.toLocalDate(saleDate);
+            const date = this.formatLocalDate(localDate);
             const amount = sale.total_price || 0;
 
             if (!dailySales[date]) {
@@ -349,7 +382,8 @@ export class LightspeedClient {
         if (sale.status === "CLOSED") {
           const saleDate = sale.sale_date || sale.created_at;
           if (saleDate) {
-            const hour = new Date(saleDate).getHours();
+            const localDate = this.toLocalDate(saleDate);
+            const hour = localDate.getHours();
             hourlySales[hour].amount += sale.total_price || 0;
             hourlySales[hour].tickets += 1;
           }
@@ -400,7 +434,8 @@ export class LightspeedClient {
         if (sale.status === "CLOSED") {
           const saleDate = sale.sale_date || sale.created_at;
           if (saleDate) {
-            const dayOfWeek = new Date(saleDate).getDay();
+            const localDate = this.toLocalDate(saleDate);
+            const dayOfWeek = localDate.getDay();
             weekdaySales[dayOfWeek].amount += sale.total_price || 0;
             weekdaySales[dayOfWeek].tickets += 1;
           }
@@ -509,7 +544,8 @@ export class LightspeedClient {
         if (sale.status === "CLOSED") {
           const saleDate = sale.sale_date || sale.created_at;
           if (saleDate) {
-            const month = saleDate.substring(0, 7); // YYYY-MM
+            const localDate = this.toLocalDate(saleDate);
+            const month = this.formatLocalMonth(localDate);
             if (!monthlySales[month]) monthlySales[month] = { amount: 0, tickets: 0 };
             monthlySales[month].amount += sale.total_price || 0;
             monthlySales[month].tickets += 1;
