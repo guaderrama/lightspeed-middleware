@@ -18,14 +18,12 @@ interface OutletDetails {
   id: string;
   name: string;
   time_zone: string;
-  // Add other relevant fields from Lightspeed Outlet API response
 }
 
 interface RetailerDetails {
   id: string;
   name: string;
   timezone: string;
-  // Add other relevant fields from Lightspeed Retailer API response
 }
 
 export class LightspeedClient {
@@ -37,8 +35,8 @@ export class LightspeedClient {
   }
 
   private async makeRequest<T>(endpoint: string, params?: URLSearchParams): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}?${params?.toString() || ""}`;
-    functions.logger.info(`Making Lightspeed API request to: ${url}`);
+    const url = `${this.baseUrl}${endpoint}${params ? '?' + params.toString() : ''}`;
+    functions.logger.info(`Lightspeed API request: ${endpoint}`);
 
     const response = await fetch(url, {
       headers: {
@@ -53,18 +51,15 @@ export class LightspeedClient {
       throw new Error(`Lightspeed API error: ${response.status} - ${errorText}`);
     }
 
-    const responseBody = await response.json(); // Get the JSON body
-    functions.logger.info("Lightspeed API raw response:", { endpoint, responseBody }); // Add this line
-    return responseBody as Promise<T>;
+    return await response.json() as T;
   }
 
   public async getOutletDetails(outletId: string): Promise<OutletDetails> {
     const data: any = await this.makeRequest(`/outlets/${outletId}`);
-    // Assuming Lightspeed returns a single Outlet object directly for /outlets/{id}
     if (!data || !data.data || data.data.length === 0) {
-      throw new Error(`Outlet with ID ${outletId} not found or no data.`);
+      throw new Error(`Outlet with ID ${outletId} not found.`);
     }
-    return data.data[0]; // Lightspeed often returns single items in an array
+    return data.data[0];
   }
 
   public async listOutlets(): Promise<OutletDetails[]> {
@@ -84,81 +79,71 @@ export class LightspeedClient {
   }
 
   /**
-   * Fetches sales data from Lightspeed API and aggregates it.
-   * Handles pagination and returns a summary.
+   * Fetches sales data from Lightspeed X-Series API and aggregates it.
+   * Uses cursor-based pagination.
    */
   public async getSalesSummary(
-    dateFrom: string, // ISO string, assumed UTC
-    dateTo: string,   // ISO string, assumed UTC
+    dateFrom: string,
+    dateTo: string,
     outletId: string,
     includeReturns: boolean = true,
   ): Promise<SalesSummary> {
     let totalAmount = 0;
     let totalTickets = 0;
-    let currentPage = 0;
-    const pageSize = 200; // Max page size for /search endpoint
     let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
 
     while (hasMore) {
       const params = new URLSearchParams({
         type: "sales",
         outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), // Extract YYYY-MM-DD
-        date_to: dateTo.substring(0, 10),     // Extract YYYY-MM-DD
-        offset: (currentPage * pageSize).toString(),
+        date_from: dateFrom.substring(0, 10),
+        date_to: dateTo.substring(0, 10),
         limit: pageSize.toString(),
+        status: "CLOSED",
       });
 
-      // Use /search endpoint for sales as per plan
-      const data: any = await this.makeRequest("/search", params);
-      functions.logger.info("Lightspeed /search (sales) response:", { data }); // Add this line
+      if (afterCursor) {
+        params.set("after", afterCursor);
+      }
 
-      // Lightspeed /search endpoint returns data under 'data' key, and sales under 'Sale' within that.
+      const data: any = await this.makeRequest("/search", params);
+
       if (!data || !data.data || !Array.isArray(data.data) || data.data.length === 0) {
         hasMore = false;
         break;
       }
 
-      // Iterate through the sales returned by the /search endpoint
-      for (const item of data.data) {
-        // The /search endpoint returns a generic 'data' array, each item has a 'type' and then the actual object.
-        // We are looking for 'Sale' type items.
-        if (item.type === "Sale" && item.Sale) {
-          const sale = item.Sale;
-          // Only process completed sales
-          if (sale.completed) {
-            totalTickets++;
-            let saleTotal = parseFloat(sale.total);
+      for (const sale of data.data) {
+        // X-Series: sales are flat objects, status CLOSED = completed
+        if (sale.status === "CLOSED") {
+          totalTickets++;
+          let saleTotal = sale.total_price || 0;
 
-            // Handle returns if includeReturns is false
-            if (!includeReturns) {
-              // Iterate through line items to identify returns (negative quantities)
-              if (sale.SaleLines && Array.isArray(sale.SaleLines)) {
-                for (const line of sale.SaleLines) {
-                  if (line.quantity < 0) {
-                    // Subtract the amount of the returned item from the sale total
-                    saleTotal -= parseFloat(line.unitPrice) * Math.abs(line.quantity);
-                  }
-                }
+          if (!includeReturns && sale.line_items) {
+            for (const line of sale.line_items) {
+              if (line.is_return || line.quantity < 0) {
+                saleTotal -= Math.abs(line.price_total || 0);
               }
             }
-            totalAmount += saleTotal;
           }
+
+          totalAmount += saleTotal;
         }
       }
 
-      currentPage++;
-      // Assume no more data if the number of sales returned is less than page size.
-      if (data.data.length < pageSize) {
+      // Cursor-based pagination
+      if (data.page_info && data.page_info.has_next_page) {
+        afterCursor = data.page_info.end_cursor;
+      } else {
         hasMore = false;
       }
     }
 
     const avgTicket = totalTickets > 0 ? totalAmount / totalTickets : 0;
 
-    // TODO: Get actual timezone from outlet or use a default
-    // For now, use the timezone from the retailer details if available, otherwise default.
-    let timezone = "America/Mazatlan"; // Default placeholder
+    let timezone = "America/Mazatlan";
     try {
       const retailerDetails = await this.getRetailerDetails();
       if (retailerDetails && retailerDetails.timezone) {
@@ -168,10 +153,9 @@ export class LightspeedClient {
       functions.logger.warn("Could not fetch retailer timezone, using default.");
     }
 
-
     return {
       generated_at: new Date().toISOString(),
-      timezone: timezone,
+      timezone,
       date_from: dateFrom,
       date_to: dateTo,
       outlet_id: outletId,
@@ -184,76 +168,15 @@ export class LightspeedClient {
   }
 
   public async getTopSellingProducts(
-    dateFrom: string, // ISO string, assumed UTC
-    dateTo: string,   // ISO string, assumed UTC
+    dateFrom: string,
+    dateTo: string,
     outletId: string,
     limit: number = 10,
-  ): Promise<any> { // TODO: Define a proper interface for the response
-    const productSales: { [key: string]: { quantity: number, name: string } } = {};
-    let currentPage = 0;
-    const pageSize = 200; // Max page size for /search endpoint
+  ): Promise<any[]> {
+    const productSales: { [key: string]: { quantity: number; revenue: number } } = {};
     let hasMore = true;
-
-    while (hasMore) {
-      const params = new URLSearchParams({
-        type: "sales",
-        outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), // Extract YYYY-MM-DD
-        date_to: dateTo.substring(0, 10),     // Extract YYYY-MM-DD
-        offset: (currentPage * pageSize).toString(),
-        limit: pageSize.toString(),
-        relations: "SaleLines.Item", // Include item details
-      });
-
-      const data: any = await this.makeRequest("/search", params);
-
-      if (!data || !data.data || !Array.isArray(data.data) || data.data.length === 0) {
-        hasMore = false;
-        break;
-      }
-
-      for (const item of data.data) {
-        if (item.type === "Sale" && item.Sale && item.Sale.SaleLines) {
-          for (const line of item.Sale.SaleLines) {
-            if (line.product_id && line.quantity > 0) { // Only count positive quantities
-              const productId = line.product_id;
-              const productName = line.product_id; // Placeholder for now
-              if (productSales[productId]) {
-                productSales[productId].quantity += line.quantity;
-              } else {
-                productSales[productId] = { quantity: line.quantity, name: productName };
-              }
-            }
-          }
-        }
-      }
-
-      currentPage++;
-      if (data.data.length < pageSize) {
-        hasMore = false;
-      }
-    }
-
-    const sortedProducts = Object.entries(productSales)
-      .map(([productId, data]) => ({ productId, name: data.name, quantity: data.quantity }))
-      .sort((a, b) => b.quantity - a.quantity);
-
-    return sortedProducts.slice(0, limit);
-  }
-
-  /**
-   * Get daily sales breakdown for a given period
-   * Returns sales amount grouped by date
-   */
-  public async getDailySales(
-    dateFrom: string, // ISO string, assumed UTC
-    dateTo: string,   // ISO string, assumed UTC
-    outletId: string,
-  ): Promise<{ date: string; amount: number; tickets: number }[]> {
-    const dailySales: { [key: string]: { amount: number; tickets: number } } = {};
-    let currentPage = 0;
+    let afterCursor: string | null = null;
     const pageSize = 200;
-    let hasMore = true;
 
     while (hasMore) {
       const params = new URLSearchParams({
@@ -261,9 +184,13 @@ export class LightspeedClient {
         outlet_id: outletId,
         date_from: dateFrom.substring(0, 10),
         date_to: dateTo.substring(0, 10),
-        offset: (currentPage * pageSize).toString(),
         limit: pageSize.toString(),
+        status: "CLOSED",
       });
+
+      if (afterCursor) {
+        params.set("after", afterCursor);
+      }
 
       const data: any = await this.makeRequest("/search", params);
 
@@ -272,12 +199,99 @@ export class LightspeedClient {
         break;
       }
 
-      for (const item of data.data) {
-        if (item.type === "Sale" && item.Sale) {
-          const saleDate = item.Sale.completed_at || item.Sale.created_at;
+      for (const sale of data.data) {
+        if (sale.status === "CLOSED" && sale.line_items) {
+          for (const line of sale.line_items) {
+            if (line.product_id && line.quantity > 0 && !line.is_return) {
+              const pid = line.product_id;
+              if (productSales[pid]) {
+                productSales[pid].quantity += line.quantity;
+                productSales[pid].revenue += (line.price_total || 0);
+              } else {
+                productSales[pid] = {
+                  quantity: line.quantity,
+                  revenue: line.price_total || 0,
+                };
+              }
+            }
+          }
+        }
+      }
+
+      if (data.page_info && data.page_info.has_next_page) {
+        afterCursor = data.page_info.end_cursor;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    // Enrich with product names
+    const sortedProducts = Object.entries(productSales)
+      .map(([productId, data]) => ({
+        productId,
+        quantity: data.quantity,
+        revenue: parseFloat(data.revenue.toFixed(2)),
+      }))
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, limit);
+
+    // Try to get product names
+    for (const product of sortedProducts) {
+      try {
+        const productData: any = await this.makeRequest(`/products/${product.productId}`);
+        if (productData && productData.data) {
+          (product as any).name = productData.data.name || productData.data.handle || product.productId;
+          (product as any).sku = productData.data.sku || "";
+        }
+      } catch {
+        (product as any).name = product.productId;
+        (product as any).sku = "";
+      }
+    }
+
+    return sortedProducts;
+  }
+
+  /**
+   * Get daily sales breakdown for a given period
+   */
+  public async getDailySales(
+    dateFrom: string,
+    dateTo: string,
+    outletId: string,
+  ): Promise<{ date: string; amount: number; tickets: number }[]> {
+    const dailySales: { [key: string]: { amount: number; tickets: number } } = {};
+    let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales",
+        outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10),
+        date_to: dateTo.substring(0, 10),
+        limit: pageSize.toString(),
+        status: "CLOSED",
+      });
+
+      if (afterCursor) {
+        params.set("after", afterCursor);
+      }
+
+      const data: any = await this.makeRequest("/search", params);
+
+      if (!data || !data.data || !Array.isArray(data.data) || data.data.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const sale of data.data) {
+        if (sale.status === "CLOSED") {
+          const saleDate = sale.sale_date || sale.created_at;
           if (saleDate) {
-            const date = saleDate.substring(0, 10); // Extract YYYY-MM-DD
-            const amount = parseFloat(item.Sale.total || 0);
+            const date = saleDate.substring(0, 10);
+            const amount = sale.total_price || 0;
 
             if (!dailySales[date]) {
               dailySales[date] = { amount: 0, tickets: 0 };
@@ -289,13 +303,13 @@ export class LightspeedClient {
         }
       }
 
-      currentPage++;
-      if (data.data.length < pageSize) {
+      if (data.page_info && data.page_info.has_next_page) {
+        afterCursor = data.page_info.end_cursor;
+      } else {
         hasMore = false;
       }
     }
 
-    // Convert to array and sort by date
     return Object.entries(dailySales)
       .map(([date, data]) => ({
         date,
@@ -303,5 +317,217 @@ export class LightspeedClient {
         tickets: data.tickets,
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get sales grouped by hour (0-23)
+   */
+  public async getHourlySales(
+    dateFrom: string,
+    dateTo: string,
+    outletId: string,
+  ): Promise<{ hour: number; amount: number; tickets: number }[]> {
+    const hourlySales: { [key: number]: { amount: number; tickets: number } } = {};
+    for (let i = 0; i < 24; i++) hourlySales[i] = { amount: 0, tickets: 0 };
+
+    let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales", outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        limit: pageSize.toString(), status: "CLOSED",
+      });
+      if (afterCursor) params.set("after", afterCursor);
+
+      const data: any = await this.makeRequest("/search", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      for (const sale of data.data) {
+        if (sale.status === "CLOSED") {
+          const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate) {
+            const hour = new Date(saleDate).getHours();
+            hourlySales[hour].amount += sale.total_price || 0;
+            hourlySales[hour].tickets += 1;
+          }
+        }
+      }
+
+      if (data.page_info?.has_next_page) { afterCursor = data.page_info.end_cursor; }
+      else { hasMore = false; }
+    }
+
+    return Object.entries(hourlySales)
+      .map(([hour, d]) => ({
+        hour: parseInt(hour),
+        amount: parseFloat(d.amount.toFixed(2)),
+        tickets: d.tickets,
+      }))
+      .sort((a, b) => a.hour - b.hour);
+  }
+
+  /**
+   * Get sales grouped by day of week
+   */
+  public async getWeekdaySales(
+    dateFrom: string,
+    dateTo: string,
+    outletId: string,
+  ): Promise<{ day: number; dayName: string; amount: number; tickets: number }[]> {
+    const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
+    const weekdaySales: { [key: number]: { amount: number; tickets: number } } = {};
+    for (let i = 0; i < 7; i++) weekdaySales[i] = { amount: 0, tickets: 0 };
+
+    let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales", outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        limit: pageSize.toString(), status: "CLOSED",
+      });
+      if (afterCursor) params.set("after", afterCursor);
+
+      const data: any = await this.makeRequest("/search", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      for (const sale of data.data) {
+        if (sale.status === "CLOSED") {
+          const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate) {
+            const dayOfWeek = new Date(saleDate).getDay();
+            weekdaySales[dayOfWeek].amount += sale.total_price || 0;
+            weekdaySales[dayOfWeek].tickets += 1;
+          }
+        }
+      }
+
+      if (data.page_info?.has_next_page) { afterCursor = data.page_info.end_cursor; }
+      else { hasMore = false; }
+    }
+
+    // Return starting from Monday (1) to Sunday (0)
+    const order = [1, 2, 3, 4, 5, 6, 0];
+    return order.map((day) => ({
+      day,
+      dayName: dayNames[day],
+      amount: parseFloat(weekdaySales[day].amount.toFixed(2)),
+      tickets: weekdaySales[day].tickets,
+    }));
+  }
+
+  /**
+   * Get sales grouped by product (top N by revenue)
+   */
+  public async getCategorySales(
+    dateFrom: string,
+    dateTo: string,
+    outletId: string,
+    limit: number = 10,
+  ): Promise<{ productId: string; name: string; quantity: number; revenue: number }[]> {
+    const productSales: { [key: string]: { quantity: number; revenue: number } } = {};
+    let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales", outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        limit: pageSize.toString(), status: "CLOSED",
+      });
+      if (afterCursor) params.set("after", afterCursor);
+
+      const data: any = await this.makeRequest("/search", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      for (const sale of data.data) {
+        if (sale.status === "CLOSED" && sale.line_items) {
+          for (const line of sale.line_items) {
+            if (line.product_id && line.quantity > 0 && !line.is_return) {
+              const pid = line.product_id;
+              if (!productSales[pid]) productSales[pid] = { quantity: 0, revenue: 0 };
+              productSales[pid].quantity += line.quantity;
+              productSales[pid].revenue += (line.price_total || 0);
+            }
+          }
+        }
+      }
+
+      if (data.page_info?.has_next_page) { afterCursor = data.page_info.end_cursor; }
+      else { hasMore = false; }
+    }
+
+    const sorted = Object.entries(productSales)
+      .map(([productId, d]) => ({ productId, name: productId, quantity: d.quantity, revenue: parseFloat(d.revenue.toFixed(2)) }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, limit);
+
+    // Enrich with product names
+    for (const product of sorted) {
+      try {
+        const productData: any = await this.makeRequest(`/products/${product.productId}`);
+        if (productData?.data) {
+          product.name = productData.data.name || productData.data.handle || product.productId;
+        }
+      } catch { /* keep productId as name */ }
+    }
+
+    return sorted;
+  }
+
+  /**
+   * Get sales grouped by month (YYYY-MM)
+   */
+  public async getMonthlySales(
+    dateFrom: string,
+    dateTo: string,
+    outletId: string,
+  ): Promise<{ month: string; amount: number; tickets: number; avg_ticket: number }[]> {
+    const monthlySales: { [key: string]: { amount: number; tickets: number } } = {};
+    let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales", outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        limit: pageSize.toString(), status: "CLOSED",
+      });
+      if (afterCursor) params.set("after", afterCursor);
+
+      const data: any = await this.makeRequest("/search", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      for (const sale of data.data) {
+        if (sale.status === "CLOSED") {
+          const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate) {
+            const month = saleDate.substring(0, 7); // YYYY-MM
+            if (!monthlySales[month]) monthlySales[month] = { amount: 0, tickets: 0 };
+            monthlySales[month].amount += sale.total_price || 0;
+            monthlySales[month].tickets += 1;
+          }
+        }
+      }
+
+      if (data.page_info?.has_next_page) { afterCursor = data.page_info.end_cursor; }
+      else { hasMore = false; }
+    }
+
+    return Object.entries(monthlySales)
+      .map(([month, d]) => ({
+        month,
+        amount: parseFloat(d.amount.toFixed(2)),
+        tickets: d.tickets,
+        avg_ticket: d.tickets > 0 ? parseFloat((d.amount / d.tickets).toFixed(2)) : 0,
+      }))
+      .sort((a, b) => a.month.localeCompare(b.month));
   }
 }

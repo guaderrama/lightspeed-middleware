@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
-import type { InventoryAnalysis } from '@/types/inventory';
 import { AlertTriangle, TrendingUp, Package, RefreshCw, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
@@ -16,7 +15,13 @@ export function Dashboard() {
     queryKey: ['inventory-status'],
     queryFn: async () => {
       const response = await apiClient.getInventoryStatus();
-      return response.data as InventoryAnalysis;
+      return {
+        ...response.data,
+        _meta: {
+          cached: response.meta?.fromCache ?? false,
+          cacheAge: 0,
+        }
+      };
     },
   });
 
@@ -27,7 +32,7 @@ export function Dashboard() {
       const response = await apiClient.getSalesComparison({
         date_from: periodDates.from,
         date_to: periodDates.to,
-        outlet_id: '1', // Default outlet - TODO: Make this configurable
+        outlet_id: '1',
       });
       return response.data;
     },
@@ -59,16 +64,33 @@ export function Dashboard() {
 
   if (!data) return null;
 
-  const { resumen, listas_rapidas, recomendaciones, aiInsights, meta } = data;
+  // Extract data matching actual backend response structure
+  const metricas = data.metricas ?? [];
+  const recomendaciones = data.recomendaciones ?? [];
+  const listas_rapidas = data.listas_rapidas ?? {};
+  const resumen_ejecutivo = data.resumen_ejecutivo ?? [];
+  const cacheMeta = data._meta ?? { cached: false, cacheAge: 0 };
+
+  // Compute summary stats from metricas
+  const totalProductos = metricas.length;
+  const alertasCriticas = recomendaciones.filter((r: any) => r.prioridad === 'alta').length;
+  const stockSaludable = metricas.filter((m: any) => m.cobertura_dias > 14).length;
+  const rotacionPromedio = metricas.length > 0
+    ? metricas.reduce((sum: number, m: any) => sum + (m.rotacion_meses || 0), 0) / metricas.length
+    : 0;
 
   // Datos para gráficos
   const priorityData = [
-    { name: 'Alta', value: recomendaciones.filter(r => r.prioridad === 'alta').length, color: '#ef4444' },
-    { name: 'Media', value: recomendaciones.filter(r => r.prioridad === 'media').length, color: '#f59e0b' },
-    { name: 'Baja', value: recomendaciones.filter(r => r.prioridad === 'baja').length, color: '#10b981' },
+    { name: 'Alta', value: recomendaciones.filter((r: any) => r.prioridad === 'alta').length, color: '#ef4444' },
+    { name: 'Media', value: recomendaciones.filter((r: any) => r.prioridad === 'media').length, color: '#f59e0b' },
+    { name: 'Baja', value: recomendaciones.filter((r: any) => r.prioridad === 'baja').length, color: '#10b981' },
   ];
 
-  const topStockouts = listas_rapidas.quiebres_inminentes.slice(0, 5);
+  // Use actual backend field names
+  const quiebres = listas_rapidas.quiebres_inminentes ?? [];
+  const sobrestock = listas_rapidas.sobrestock ?? [];
+  const lentaRotacion = listas_rapidas.lenta_rotacion ?? [];
+  const topStockouts = quiebres.slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -78,8 +100,8 @@ export function Dashboard() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Dashboard de Inventario</h1>
             <p className="text-gray-500 mt-1">
-              {meta.cached ? (
-                <>Datos en caché • Actualizado hace {Math.round((meta.cacheAge || 0) / 60)} min</>
+              {cacheMeta.cached ? (
+                <>Datos en caché • Actualizado hace {Math.round((cacheMeta.cacheAge || 0) / 60)} min</>
               ) : (
                 <>Datos en tiempo real</>
               )}
@@ -102,6 +124,18 @@ export function Dashboard() {
         <PeriodSelector value={period} onChange={setPeriod} />
       </div>
 
+      {/* Resumen Ejecutivo */}
+      {resumen_ejecutivo.length > 0 && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-3">Resumen Ejecutivo</h3>
+          <ul className="space-y-1">
+            {resumen_ejecutivo.map((item: string, idx: number) => (
+              <li key={idx} className="text-sm text-gray-700">{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Métricas principales */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {salesLoading ? (
@@ -112,28 +146,28 @@ export function Dashboard() {
           <>
             <MetricCardWithChange
               title="Ventas del Período"
-              value={`$${salesData.current.summary.amount.toLocaleString()}`}
-              change={salesData.changes.amount}
+              value={`$${salesData.current?.summary?.amount?.toLocaleString() ?? '0'}`}
+              change={salesData.changes?.amount}
               icon={TrendingUp}
               color="green"
             />
             <MetricCardWithChange
               title="Transacciones"
-              value={salesData.current.summary.tickets.toLocaleString()}
-              change={salesData.changes.tickets}
+              value={salesData.current?.summary?.tickets?.toLocaleString() ?? '0'}
+              change={salesData.changes?.tickets}
               icon={Package}
               color="blue"
             />
             <MetricCardWithChange
               title="Ticket Promedio"
-              value={`$${salesData.current.summary.avg_ticket.toLocaleString()}`}
-              change={salesData.changes.avg_ticket}
+              value={`$${salesData.current?.summary?.avg_ticket?.toLocaleString() ?? '0'}`}
+              change={salesData.changes?.avg_ticket}
               icon={RefreshCw}
               color="purple"
             />
             <MetricCardWithChange
               title="Alertas Críticas"
-              value={resumen.alertas_criticas}
+              value={alertasCriticas}
               icon={AlertTriangle}
               color="red"
             />
@@ -142,25 +176,25 @@ export function Dashboard() {
           <>
             <MetricCardWithChange
               title="Total Productos"
-              value={resumen.total_productos}
+              value={totalProductos}
               icon={Package}
               color="blue"
             />
             <MetricCardWithChange
               title="Alertas Críticas"
-              value={resumen.alertas_criticas}
+              value={alertasCriticas}
               icon={AlertTriangle}
               color="red"
             />
             <MetricCardWithChange
               title="Stock Saludable"
-              value={resumen.stock_saludable}
+              value={stockSaludable}
               icon={TrendingUp}
               color="green"
             />
             <MetricCardWithChange
               title="Rotación Promedio"
-              value={`${resumen.rotacion_promedio.toFixed(1)}x`}
+              value={`${rotacionPromedio.toFixed(1)}x`}
               icon={RefreshCw}
               color="purple"
             />
@@ -172,7 +206,7 @@ export function Dashboard() {
       {salesData && salesData.daily_sales && salesData.daily_sales.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            📈 Tendencia de Ventas Diarias
+            Tendencia de Ventas Diarias
           </h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={salesData.daily_sales}>
@@ -215,23 +249,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* AI Insights */}
-      {aiInsights && (
-        <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-6">
-          <div className="flex items-start gap-3">
-            <Sparkles className="h-6 w-6 text-purple-600 mt-1 flex-shrink-0" />
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Análisis IA (Gemini 3 Flash)
-              </h3>
-              <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
-                {aiInsights}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Gráficos */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Prioridades */}
@@ -260,20 +277,24 @@ export function Dashboard() {
           </ResponsiveContainer>
         </div>
 
-        {/* Quiebres inminentes */}
+        {/* Quiebres inminentes chart */}
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
             Top 5 Quiebres Inminentes
           </h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={topStockouts} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
-              <YAxis dataKey="nombre" type="category" width={150} />
-              <Tooltip />
-              <Bar dataKey="dias_restantes" fill="#ef4444" />
-            </BarChart>
-          </ResponsiveContainer>
+          {topStockouts.length > 0 ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={topStockouts} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis type="number" />
+                <YAxis dataKey="nombre" type="category" width={150} />
+                <Tooltip />
+                <Bar dataKey="dias_cobertura" fill="#ef4444" name="Días de cobertura" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-gray-500 text-center py-8">Sin quiebres inminentes</p>
+          )}
         </div>
       </div>
 
@@ -282,46 +303,44 @@ export function Dashboard() {
         {/* Quiebres inminentes */}
         <QuickListCard
           title="Quiebres Inminentes"
-          items={listas_rapidas.quiebres_inminentes.slice(0, 5)}
+          items={quiebres.slice(0, 5)}
           color="red"
           renderItem={(item) => (
             <>
               <p className="font-medium text-gray-900">{item.nombre}</p>
-              <p className="text-sm text-gray-500">{item.ubicacion}</p>
+              <p className="text-sm text-gray-500">SKU: {item.sku}</p>
               <p className="text-sm font-semibold text-red-600 mt-1">
-                {item.dias_restantes} días restantes
+                {item.dias_cobertura} días de cobertura • Stock: {item.stock_actual}
               </p>
             </>
           )}
         />
 
-        {/* Exceso de inventario */}
+        {/* Sobrestock */}
         <QuickListCard
-          title="Exceso de Inventario"
-          items={listas_rapidas.exceso_inventario.slice(0, 5)}
+          title="Sobrestock"
+          items={sobrestock.slice(0, 5)}
           color="orange"
           renderItem={(item) => (
             <>
               <p className="font-medium text-gray-900">{item.nombre}</p>
-              <p className="text-sm text-gray-500">{item.ubicacion}</p>
+              <p className="text-sm text-gray-500">SKU: {item.sku}</p>
               <p className="text-sm font-semibold text-orange-600 mt-1">
-                Stock: {item.stock} • Rotación: {item.rotacion_anual.toFixed(1)}x
+                Stock: {item.stock_actual}
               </p>
             </>
           )}
         />
 
-        {/* Productos críticos */}
+        {/* Lenta rotación */}
         <QuickListCard
-          title="Productos Críticos"
-          items={listas_rapidas.productos_criticos.slice(0, 5)}
+          title="Lenta Rotación"
+          items={lentaRotacion.slice(0, 5)}
           color="purple"
           renderItem={(item) => (
             <>
               <p className="font-medium text-gray-900">{item.nombre}</p>
-              <p className="text-sm text-gray-500">
-                {item.clasificacion} • {item.status}
-              </p>
+              <p className="text-sm text-gray-500">SKU: {item.sku}</p>
             </>
           )}
         />
@@ -333,7 +352,7 @@ export function Dashboard() {
           Recomendaciones ({recomendaciones.length})
         </h3>
         <div className="space-y-3">
-          {recomendaciones.slice(0, 10).map((rec, idx) => (
+          {recomendaciones.slice(0, 10).map((rec: any, idx: number) => (
             <div
               key={idx}
               className={cn(
@@ -345,10 +364,10 @@ export function Dashboard() {
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <p className="font-medium text-gray-900">{rec.accion}</p>
-                  <p className="text-sm text-gray-600 mt-1">{rec.detalles}</p>
+                  <p className="font-medium text-gray-900">{rec.notas}</p>
                   <p className="text-xs text-gray-500 mt-2">
-                    {rec.producto} • {rec.ubicacion} • {rec.tipo}
+                    {rec.nombre} • {rec.ubicacion} • {rec.motivo}
+                    {rec.cantidad_sugerida > 0 && ` • Ordenar: ${rec.cantidad_sugerida} uds`}
                   </p>
                 </div>
                 <span
@@ -371,34 +390,6 @@ export function Dashboard() {
 }
 
 // Componentes auxiliares
-function MetricCard({ title, value, icon: Icon, color }: {
-  title: string;
-  value: string | number;
-  icon: any;
-  color: 'blue' | 'red' | 'green' | 'purple';
-}) {
-  const colorClasses: Record<string, string> = {
-    blue: 'bg-blue-50 text-blue-600',
-    red: 'bg-red-50 text-red-600',
-    green: 'bg-green-50 text-green-600',
-    purple: 'bg-purple-50 text-purple-600',
-  };
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6">
-      <div className="flex items-center gap-3">
-        <div className={cn('p-3 rounded-lg', colorClasses[color])}>
-          <Icon className="h-6 w-6" />
-        </div>
-        <div>
-          <p className="text-sm text-gray-500">{title}</p>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function QuickListCard({ title, items, color, renderItem }: {
   title: string;
   items: any[];

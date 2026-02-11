@@ -15,6 +15,7 @@ interface ApiResponse<T> {
     timestamp: string;
     requestId: string;
     version?: string;
+    fromCache?: boolean;
   };
 }
 
@@ -116,6 +117,26 @@ class ApiClient {
     });
 
     return this.request<any>(`/reports/sales-comparison?${queryParams}`);
+  }
+
+  async getHourlySales(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/reports/sales-hourly?${queryParams}`);
+  }
+
+  async getWeekdaySales(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/reports/sales-weekday?${queryParams}`);
+  }
+
+  async getCategorySales(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/reports/sales-category?${queryParams}`);
+  }
+
+  async getMonthlySales(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/reports/sales-monthly?${queryParams}`);
   }
 }
 

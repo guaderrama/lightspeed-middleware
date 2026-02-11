@@ -1,45 +1,87 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
-import { Calendar, TrendingUp, Download } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { TrendingUp, DollarSign, ShoppingCart, Clock, CalendarDays, PieChart as PieIcon, BarChart3 } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line,
+} from 'recharts';
+import { PeriodSelector, getPeriodDates, type Period } from '@/components/PeriodSelector';
+import { MetricCardWithChange } from '@/components/MetricCardWithChange';
+
+const COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'];
 
 export function Reports() {
-  const [dateFrom, setDateFrom] = useState(() => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 1);
-    return date.toISOString().split('T')[0];
-  });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
-  const [outletId] = useState('1'); // Default outlet
+  const [period, setPeriod] = useState<Period>('month');
+  const periodDates = getPeriodDates(period);
+  const [outletId] = useState('1');
 
+  const queryParams = { date_from: periodDates.from, date_to: periodDates.to, outlet_id: outletId };
+
+  // Sales Summary
   const { data: salesSummary, isLoading: loadingSummary } = useQuery({
-    queryKey: ['sales-summary', dateFrom, dateTo, outletId],
+    queryKey: ['sales-summary', periodDates.from, periodDates.to],
     queryFn: async () => {
-      const response = await apiClient.getSalesSummary({
-        date_from: dateFrom,
-        date_to: dateTo,
-        outlet_id: outletId,
-        include_returns: true,
-      });
+      const response = await apiClient.getSalesSummary({ ...queryParams, include_returns: true });
       return response.data;
     },
-    enabled: !!dateFrom && !!dateTo,
   });
 
-  const { data: topProducts, isLoading: loadingTop } = useQuery({
-    queryKey: ['top-products', dateFrom, dateTo, outletId],
+  // Sales Comparison (for % change)
+  const { data: salesComparison } = useQuery({
+    queryKey: ['sales-comparison-reports', periodDates.from, periodDates.to],
     queryFn: async () => {
-      const response = await apiClient.getTopSellingProducts({
-        date_from: dateFrom,
-        date_to: dateTo,
-        outlet_id: outletId,
-        limit: 10,
-      });
+      const response = await apiClient.getSalesComparison(queryParams);
       return response.data;
     },
-    enabled: !!dateFrom && !!dateTo,
   });
+
+  // Top Products
+  const { data: topProducts, isLoading: loadingTop } = useQuery({
+    queryKey: ['top-products', periodDates.from, periodDates.to],
+    queryFn: async () => {
+      const response = await apiClient.getTopSellingProducts({ ...queryParams, limit: 10 });
+      return response.data;
+    },
+  });
+
+  // Hourly Sales
+  const { data: hourlySales, isLoading: loadingHourly } = useQuery({
+    queryKey: ['hourly-sales', periodDates.from, periodDates.to],
+    queryFn: async () => {
+      const response = await apiClient.getHourlySales(queryParams);
+      return response.data;
+    },
+  });
+
+  // Weekday Sales
+  const { data: weekdaySales, isLoading: loadingWeekday } = useQuery({
+    queryKey: ['weekday-sales', periodDates.from, periodDates.to],
+    queryFn: async () => {
+      const response = await apiClient.getWeekdaySales(queryParams);
+      return response.data;
+    },
+  });
+
+  // Category Sales
+  const { data: categorySales, isLoading: loadingCategory } = useQuery({
+    queryKey: ['category-sales', periodDates.from, periodDates.to],
+    queryFn: async () => {
+      const response = await apiClient.getCategorySales(queryParams);
+      return response.data;
+    },
+  });
+
+  // Monthly Sales
+  const { data: monthlySales, isLoading: loadingMonthly } = useQuery({
+    queryKey: ['monthly-sales', periodDates.from, periodDates.to],
+    queryFn: async () => {
+      const response = await apiClient.getMonthlySales(queryParams);
+      return response.data;
+    },
+  });
+
+  const changes = salesComparison?.changes;
 
   return (
     <div className="space-y-6">
@@ -47,153 +89,209 @@ export function Reports() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Reportes de Ventas</h1>
-          <p className="text-gray-500 mt-1">Análisis y métricas de ventas</p>
+          <p className="text-gray-500 mt-1">Analisis profundo de ventas por periodo</p>
         </div>
       </div>
 
-      {/* Filtros de fecha */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <Calendar className="h-5 w-5" />
-          Período de análisis
-        </h3>
-        <div className="flex gap-4 items-end">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Fecha inicio
-            </label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+      {/* Period Selector */}
+      <PeriodSelector value={period} onChange={setPeriod} />
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {loadingSummary ? (
+          <div className="col-span-3 text-center py-8 text-gray-500">Cargando resumen...</div>
+        ) : salesSummary ? (
+          <>
+            <MetricCardWithChange
+              title="Ventas Totales"
+              value={`$${(salesSummary.totals?.amount ?? 0).toLocaleString()}`}
+              change={changes?.amount}
+              icon={DollarSign}
+              color="green"
             />
-          </div>
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Fecha fin
-            </label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            <MetricCardWithChange
+              title="Transacciones"
+              value={(salesSummary.totals?.tickets ?? 0).toLocaleString()}
+              change={changes?.tickets}
+              icon={ShoppingCart}
+              color="blue"
             />
-          </div>
-          <button className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2">
-            <Download className="h-4 w-4" />
-            Exportar
-          </button>
-        </div>
+            <MetricCardWithChange
+              title="Ticket Promedio"
+              value={`$${(salesSummary.totals?.avg_ticket ?? 0).toLocaleString()}`}
+              change={changes?.avg_ticket}
+              icon={TrendingUp}
+              color="purple"
+            />
+          </>
+        ) : null}
       </div>
 
-      {/* Resumen de ventas */}
-      {loadingSummary ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
-          <p className="text-gray-500">Cargando resumen de ventas...</p>
-        </div>
-      ) : salesSummary ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <MetricCard
-            title="Ventas Totales"
-            value={`$${salesSummary.total_sales?.toLocaleString() || 0}`}
-            change="+12.5%"
-            positive
-          />
-          <MetricCard
-            title="Transacciones"
-            value={salesSummary.total_transactions?.toLocaleString() || 0}
-            change="+8.3%"
-            positive
-          />
-          <MetricCard
-            title="Ticket Promedio"
-            value={`$${salesSummary.avg_ticket?.toLocaleString() || 0}`}
-            change="-2.1%"
-            positive={false}
-          />
-        </div>
-      ) : null}
+      {/* Top Products */}
+      <ChartCard title="Top 10 Productos Mas Vendidos" icon={BarChart3} loading={loadingTop}>
+        {topProducts && topProducts.length > 0 && (
+          <>
+            <ResponsiveContainer width="100%" height={350}>
+              <BarChart data={topProducts}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" angle={-45} textAnchor="end" height={120} tick={{ fontSize: 11 }} />
+                <YAxis yAxisId="left" tickFormatter={(v) => `${v}`} />
+                <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => `$${v}`} />
+                <Tooltip formatter={(value: any, name?: string) => [name === 'Ingreso' ? `$${value.toLocaleString()}` : value, name ?? '']} />
+                <Legend />
+                <Bar yAxisId="left" dataKey="quantity" fill="#8b5cf6" name="Cantidad" />
+                <Bar yAxisId="right" dataKey="revenue" fill="#10b981" name="Ingreso" />
+              </BarChart>
+            </ResponsiveContainer>
 
-      {/* Top productos */}
-      {loadingTop ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
-          <p className="text-gray-500">Cargando productos más vendidos...</p>
-        </div>
-      ) : topProducts && topProducts.length > 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Top 10 Productos Más Vendidos
-          </h3>
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={topProducts}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" angle={-45} textAnchor="end" height={120} />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="quantity_sold" fill="#8b5cf6" name="Cantidad Vendida" />
-              <Bar dataKey="revenue" fill="#10b981" name="Ingreso ($)" />
-            </BarChart>
-          </ResponsiveContainer>
-
-          <div className="mt-6 overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead>
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Producto
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Cantidad
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Ingreso
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Precio Prom.
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {topProducts.map((product: any, idx: number) => (
-                  <tr key={idx}>
-                    <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {product.name}
-                    </td>
-                    <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                      {product.quantity_sold}
-                    </td>
-                    <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                      ${product.revenue?.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                      ${product.avg_price?.toLocaleString()}
-                    </td>
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead>
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cantidad</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ingreso</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio Prom.</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
-          <p className="text-gray-500">No hay datos de productos para este período</p>
-        </div>
-      )}
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {topProducts.map((product: any, idx: number) => (
+                    <tr key={idx}>
+                      <td className="px-4 py-3 text-sm text-gray-500">{idx + 1}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{product.name}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 text-right">{product.quantity}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 text-right">${product.revenue?.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 text-right">
+                        ${product.quantity > 0 ? (product.revenue / product.quantity).toFixed(2) : '0'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </ChartCard>
+
+      {/* 2x2 Grid: Hourly, Weekday, Category, Monthly */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Hourly Sales */}
+        <ChartCard title="Ventas por Hora del Dia" icon={Clock} loading={loadingHourly}>
+          {hourlySales && hourlySales.length > 0 && (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={hourlySales}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="hour" tickFormatter={(h) => `${h}:00`} tick={{ fontSize: 11 }} />
+                <YAxis tickFormatter={(v) => `$${v}`} />
+                <Tooltip
+                  formatter={(value: any, name?: string) => [
+                    name === 'Ventas' ? `$${value.toLocaleString()}` : value,
+                    name ?? '',
+                  ]}
+                  labelFormatter={(h) => `${h}:00 - ${h}:59`}
+                />
+                <Bar dataKey="amount" fill="#8b5cf6" name="Ventas" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        {/* Weekday Sales */}
+        <ChartCard title="Ventas por Dia de la Semana" icon={CalendarDays} loading={loadingWeekday}>
+          {weekdaySales && weekdaySales.length > 0 && (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={weekdaySales}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="dayName" tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="left" tickFormatter={(v) => `$${v}`} />
+                <YAxis yAxisId="right" orientation="right" />
+                <Tooltip
+                  formatter={(value: any, name?: string) => [
+                    name === 'Ventas' ? `$${value.toLocaleString()}` : value,
+                    name ?? '',
+                  ]}
+                />
+                <Legend />
+                <Bar yAxisId="left" dataKey="amount" fill="#10b981" name="Ventas" radius={[4, 4, 0, 0]} />
+                <Bar yAxisId="right" dataKey="tickets" fill="#3b82f6" name="Tickets" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        {/* Category Sales */}
+        <ChartCard title="Ventas por Producto" icon={PieIcon} loading={loadingCategory}>
+          {categorySales && categorySales.length > 0 && (
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie
+                  data={categorySales}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${(name ?? '').substring(0, 15)}${(name ?? '').length > 15 ? '...' : ''} (${((percent ?? 0) * 100).toFixed(0)}%)`}
+                  outerRadius={100}
+                  dataKey="revenue"
+                  nameKey="name"
+                >
+                  {categorySales.map((_: any, idx: number) => (
+                    <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: any) => [`$${value.toLocaleString()}`, 'Ingreso']} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        {/* Monthly Trend */}
+        <ChartCard title="Tendencia Mensual" icon={TrendingUp} loading={loadingMonthly}>
+          {monthlySales && monthlySales.length > 0 && (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={monthlySales}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis yAxisId="left" tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => `$${v}`} />
+                <Tooltip
+                  formatter={(value: any, name?: string) => [`$${value.toLocaleString()}`, name ?? '']}
+                />
+                <Legend />
+                <Line yAxisId="left" type="monotone" dataKey="amount" stroke="#10b981" strokeWidth={2} name="Ventas" dot={{ r: 4 }} />
+                <Line yAxisId="right" type="monotone" dataKey="avg_ticket" stroke="#8b5cf6" strokeWidth={2} name="Ticket Prom." dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </div>
     </div>
   );
 }
 
-function MetricCard({ title, value, change, positive }: any) {
+function ChartCard({ title, icon: Icon, loading, children }: {
+  title: string;
+  icon: any;
+  loading?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-6">
-      <p className="text-sm text-gray-500 mb-1">{title}</p>
-      <p className="text-3xl font-bold text-gray-900 mb-2">{value}</p>
-      <p className={`text-sm font-semibold ${positive ? 'text-green-600' : 'text-red-600'}`}>
-        {change} vs período anterior
-      </p>
+      <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+        <Icon className="h-5 w-5 text-gray-600" />
+        {title}
+      </h3>
+      {loading ? (
+        <div className="flex items-center justify-center h-48">
+          <p className="text-gray-500">Cargando...</p>
+        </div>
+      ) : children ? (
+        children
+      ) : (
+        <div className="flex items-center justify-center h-48">
+          <p className="text-gray-500">Sin datos para este periodo</p>
+        </div>
+      )}
     </div>
   );
 }

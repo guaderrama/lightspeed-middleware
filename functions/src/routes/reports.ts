@@ -1,10 +1,35 @@
 import express from 'express';
 import * as logger from 'firebase-functions/logger';
 import { LightspeedClient } from '../services/lightspeed';
+import { CacheService } from '../services/cache';
 
 const router = express.Router();
-
+const cache = new CacheService();
 const lightspeedClient = new LightspeedClient(process.env.LIGHTSPEED_PERSONAL_TOKEN || '');
+
+/**
+ * Resolve outlet_id: if not a UUID, fetch first real outlet from Lightspeed
+ */
+async function resolveOutletId(outletId: string): Promise<string> {
+  // If it looks like a UUID, use as-is
+  if (outletId.includes('-') && outletId.length > 10) {
+    return outletId;
+  }
+
+  // Otherwise, resolve to first real outlet
+  let outlets = await cache.get<any[]>('outlets-list');
+  if (!outlets) {
+    outlets = await lightspeedClient.listOutlets();
+    await cache.set('outlets-list', outlets, { ttl: 3600 });
+  }
+
+  if (outlets && outlets.length > 0) {
+    logger.info(`Resolved outlet_id '${outletId}' to '${outlets[0].id}' (${outlets[0].name})`);
+    return outlets[0].id;
+  }
+
+  throw new Error('No outlets found in Lightspeed');
+}
 
 /**
  * GET /reports/sales-summary
@@ -23,8 +48,9 @@ router.get('/sales-summary', async (req: express.Request, res: express.Response)
     }
 
     const includeReturns = include_returns !== 'false';
+    const resolvedOutletId = await resolveOutletId(outlet_id as string);
     const rawData = await lightspeedClient.getSalesSummary(
-      date_from as string, date_to as string, outlet_id as string, includeReturns
+      date_from as string, date_to as string, resolvedOutletId, includeReturns
     );
 
     return res.status(200).json({
@@ -57,8 +83,9 @@ router.get('/sales-top', async (req: express.Request, res: express.Response) => 
     }
 
     const limitNum = limit ? parseInt(limit as string) : 10;
+    const resolvedOutletId = await resolveOutletId(outlet_id as string);
     const topProducts = await lightspeedClient.getTopSellingProducts(
-      date_from as string, date_to as string, outlet_id as string, limitNum
+      date_from as string, date_to as string, resolvedOutletId, limitNum
     );
 
     return res.status(200).json({
@@ -105,14 +132,17 @@ router.get('/sales-comparison', async (req: express.Request, res: express.Respon
       previous: { from: previousFrom.toISOString(), to: previousTo.toISOString() }
     });
 
+    // Resolve outlet ID
+    const resolvedOutletId = await resolveOutletId(outlet_id as string);
+
     // Fetch data in parallel
     const [dailySales, currentSummary, previousSummary] = await Promise.all([
-      lightspeedClient.getDailySales(date_from, date_to, outlet_id),
-      lightspeedClient.getSalesSummary(date_from, date_to, outlet_id, true),
+      lightspeedClient.getDailySales(date_from, date_to, resolvedOutletId),
+      lightspeedClient.getSalesSummary(date_from, date_to, resolvedOutletId, true),
       lightspeedClient.getSalesSummary(
         previousFrom.toISOString(),
         previousTo.toISOString(),
-        outlet_id,
+        resolvedOutletId,
         true
       ),
     ]);
@@ -146,6 +176,135 @@ router.get('/sales-comparison', async (req: express.Request, res: express.Respon
     });
   } catch (error: any) {
     logger.error('Error in sales-comparison', { correlationId, error: error.message, stack: error.stack });
+    return res.status(500).json({
+      error: { code: 'INTERNAL_ERROR', message: error.message },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+});
+
+/**
+ * GET /reports/sales-hourly
+ * Sales grouped by hour of day (0-23)
+ */
+router.get('/sales-hourly', async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId;
+  const { date_from, date_to, outlet_id } = req.query as any;
+
+  try {
+    if (!date_from || !date_to || !outlet_id) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Missing required parameters: date_from, date_to, outlet_id' },
+        meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+      });
+    }
+
+    const resolvedOutletId = await resolveOutletId(outlet_id as string);
+    const data = await lightspeedClient.getHourlySales(date_from, date_to, resolvedOutletId);
+
+    return res.status(200).json({
+      data,
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId, version: '2.0.0' }
+    });
+  } catch (error: any) {
+    logger.error('Error in sales-hourly', { correlationId, error: error.message });
+    return res.status(500).json({
+      error: { code: 'INTERNAL_ERROR', message: error.message },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+});
+
+/**
+ * GET /reports/sales-weekday
+ * Sales grouped by day of week
+ */
+router.get('/sales-weekday', async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId;
+  const { date_from, date_to, outlet_id } = req.query as any;
+
+  try {
+    if (!date_from || !date_to || !outlet_id) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Missing required parameters: date_from, date_to, outlet_id' },
+        meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+      });
+    }
+
+    const resolvedOutletId = await resolveOutletId(outlet_id as string);
+    const data = await lightspeedClient.getWeekdaySales(date_from, date_to, resolvedOutletId);
+
+    return res.status(200).json({
+      data,
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId, version: '2.0.0' }
+    });
+  } catch (error: any) {
+    logger.error('Error in sales-weekday', { correlationId, error: error.message });
+    return res.status(500).json({
+      error: { code: 'INTERNAL_ERROR', message: error.message },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+});
+
+/**
+ * GET /reports/sales-category
+ * Sales grouped by product/category (top 10)
+ */
+router.get('/sales-category', async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId;
+  const { date_from, date_to, outlet_id, limit } = req.query as any;
+
+  try {
+    if (!date_from || !date_to || !outlet_id) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Missing required parameters: date_from, date_to, outlet_id' },
+        meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+      });
+    }
+
+    const limitNum = limit ? parseInt(limit as string) : 10;
+    const resolvedOutletId = await resolveOutletId(outlet_id as string);
+    const data = await lightspeedClient.getCategorySales(date_from, date_to, resolvedOutletId, limitNum);
+
+    return res.status(200).json({
+      data,
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId, version: '2.0.0' }
+    });
+  } catch (error: any) {
+    logger.error('Error in sales-category', { correlationId, error: error.message });
+    return res.status(500).json({
+      error: { code: 'INTERNAL_ERROR', message: error.message },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+});
+
+/**
+ * GET /reports/sales-monthly
+ * Sales grouped by month
+ */
+router.get('/sales-monthly', async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId;
+  const { date_from, date_to, outlet_id } = req.query as any;
+
+  try {
+    if (!date_from || !date_to || !outlet_id) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Missing required parameters: date_from, date_to, outlet_id' },
+        meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+      });
+    }
+
+    const resolvedOutletId = await resolveOutletId(outlet_id as string);
+    const data = await lightspeedClient.getMonthlySales(date_from, date_to, resolvedOutletId);
+
+    return res.status(200).json({
+      data,
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId, version: '2.0.0' }
+    });
+  } catch (error: any) {
+    logger.error('Error in sales-monthly', { correlationId, error: error.message });
     return res.status(500).json({
       error: { code: 'INTERNAL_ERROR', message: error.message },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
