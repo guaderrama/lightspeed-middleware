@@ -85,6 +85,53 @@ export class GeminiService {
   }
 
   /**
+   * Forecast demand using AI based on sales history and inventory data
+   */
+  async forecastDemand(salesData: any, inventoryData: any): Promise<any> {
+    try {
+      logger.info('Calling Gemini for demand forecast');
+
+      const prompt = `Eres un experto en forecasting de demanda para retail.
+
+DATOS DE VENTAS RECIENTES:
+${JSON.stringify(salesData, null, 2)}
+
+DATOS DE INVENTARIO ACTUAL:
+${JSON.stringify(inventoryData, null, 2)}
+
+INSTRUCCIONES:
+Analiza los patrones de venta y genera un forecast. Responde SOLO con un JSON válido (sin markdown, sin backticks) con esta estructura:
+{
+  "alerts": [
+    {
+      "type": "stockout_risk" | "overstock" | "trending_up" | "slow_moving",
+      "severity": "critical" | "warning" | "info",
+      "product": "nombre del producto",
+      "message": "descripción clara de la alerta",
+      "action": "acción recomendada"
+    }
+  ],
+  "forecast_summary": "resumen de 2-3 oraciones sobre la tendencia general",
+  "top_recommendations": ["recomendación 1", "recomendación 2", "recomendación 3"]
+}`;
+
+      const result = await this.model.generateContent(prompt);
+      const text = result.response.text().trim();
+
+      // Parse JSON, handling possible markdown wrapping
+      const jsonStr = text.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
+      return JSON.parse(jsonStr);
+    } catch (error: any) {
+      logger.error('Gemini forecast error', { error: error.message });
+      return {
+        alerts: [],
+        forecast_summary: 'No se pudo generar el forecast en este momento.',
+        top_recommendations: [],
+      };
+    }
+  }
+
+  /**
    * Construye el prompt para análisis de inventario
    */
   private buildInventoryPrompt(data: Partial<InventoryAnalysis>): string {

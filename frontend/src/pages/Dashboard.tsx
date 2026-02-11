@@ -1,15 +1,23 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
-import { AlertTriangle, TrendingUp, Package, RefreshCw, Sparkles } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Package, RefreshCw, Sparkles, Search, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
 import { PeriodSelector, getPeriodDates, type Period } from '@/components/PeriodSelector';
 import { MetricCardWithChange } from '@/components/MetricCardWithChange';
+import { useOutlet } from '@/contexts/OutletContext';
+import { exportToExcel } from '@/lib/export-excel';
+import { AlertPanel } from '@/components/AlertPanel';
 
 export function Dashboard() {
   const [period, setPeriod] = useState<Period>('month');
-  const periodDates = getPeriodDates(period);
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const periodDates = getPeriodDates(period, customFrom, customTo);
+  const { outletId } = useOutlet();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState<string>('all');
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['inventory-status'],
@@ -27,12 +35,12 @@ export function Dashboard() {
 
   // New query for sales comparison data
   const { data: salesData, isLoading: salesLoading } = useQuery({
-    queryKey: ['sales-comparison', periodDates.from, periodDates.to],
+    queryKey: ['sales-comparison', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getSalesComparison({
         date_from: periodDates.from,
         date_to: periodDates.to,
-        outlet_id: '1',
+        outlet_id: outletId,
       });
       return response.data;
     },
@@ -107,21 +115,53 @@ export function Dashboard() {
               )}
             </p>
           </div>
-          <button
-            onClick={handleRefresh}
-            disabled={isFetching}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors',
-              isFetching && 'opacity-50 cursor-not-allowed'
-            )}
-          >
-            <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
-            Actualizar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (metricas.length > 0) {
+                  exportToExcel(metricas, { filename: 'inventario-metricas', sheetName: 'Métricas' });
+                }
+              }}
+              disabled={metricas.length === 0}
+              className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              Excel
+            </button>
+            <button
+              onClick={handleRefresh}
+              disabled={isFetching}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors',
+                isFetching && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
+              Actualizar
+            </button>
+          </div>
+        </div>
+
+        {/* Search Bar */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Buscar productos, SKU, recomendaciones..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 placeholder:text-gray-400"
+          />
         </div>
 
         {/* Period Selector */}
-        <PeriodSelector value={period} onChange={setPeriod} />
+        <PeriodSelector
+          value={period}
+          onChange={setPeriod}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomChange={(from, to) => { setCustomFrom(from); setCustomTo(to); }}
+        />
       </div>
 
       {/* Resumen Ejecutivo */}
@@ -135,6 +175,9 @@ export function Dashboard() {
           </ul>
         </div>
       )}
+
+      {/* AI Alerts Panel */}
+      <AlertPanel />
 
       {/* Métricas principales */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -303,7 +346,7 @@ export function Dashboard() {
         {/* Quiebres inminentes */}
         <QuickListCard
           title="Quiebres Inminentes"
-          items={quiebres.slice(0, 5)}
+          items={quiebres}
           color="red"
           renderItem={(item) => (
             <>
@@ -319,7 +362,7 @@ export function Dashboard() {
         {/* Sobrestock */}
         <QuickListCard
           title="Sobrestock"
-          items={sobrestock.slice(0, 5)}
+          items={sobrestock}
           color="orange"
           renderItem={(item) => (
             <>
@@ -335,7 +378,7 @@ export function Dashboard() {
         {/* Lenta rotación */}
         <QuickListCard
           title="Lenta Rotación"
-          items={lentaRotacion.slice(0, 5)}
+          items={lentaRotacion}
           color="purple"
           renderItem={(item) => (
             <>
@@ -348,11 +391,41 @@ export function Dashboard() {
 
       {/* Recomendaciones */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          Recomendaciones ({recomendaciones.length})
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">
+            Recomendaciones ({recomendaciones.length})
+          </h3>
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+            {['all', 'alta', 'media', 'baja'].map((p) => (
+              <button
+                key={p}
+                onClick={() => setPriorityFilter(p)}
+                className={cn(
+                  'px-3 py-1 text-xs font-medium rounded-md transition-all',
+                  priorityFilter === p
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-900'
+                )}
+              >
+                {p === 'all' ? 'Todas' : p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="space-y-3">
-          {recomendaciones.slice(0, 10).map((rec: any, idx: number) => (
+          {recomendaciones
+            .filter((rec: any) => priorityFilter === 'all' || rec.prioridad === priorityFilter)
+            .filter((rec: any) => {
+              if (!searchQuery) return true;
+              const q = searchQuery.toLowerCase();
+              return (
+                rec.nombre?.toLowerCase().includes(q) ||
+                rec.notas?.toLowerCase().includes(q) ||
+                rec.motivo?.toLowerCase().includes(q)
+              );
+            })
+            .slice(0, 15)
+            .map((rec: any, idx: number) => (
             <div
               key={idx}
               className={cn(
@@ -390,22 +463,28 @@ export function Dashboard() {
 }
 
 // Componentes auxiliares
-function QuickListCard({ title, items, color, renderItem }: {
+function QuickListCard({ title, items, color, renderItem, totalCount }: {
   title: string;
   items: any[];
   color: 'red' | 'orange' | 'purple';
   renderItem: (item: any) => React.ReactNode;
+  totalCount?: number;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const borderColor: Record<string, string> = {
     red: 'border-red-200',
     orange: 'border-orange-200',
     purple: 'border-purple-200',
   };
 
+  const total = totalCount ?? items.length;
+  const displayItems = expanded ? items : items.slice(0, 5);
+  const hasMore = items.length > 5;
+
   if (items.length === 0) {
     return (
       <div className={cn('bg-white border rounded-lg p-6', borderColor[color])}>
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">{title} <span className="text-sm font-normal text-gray-400">({total})</span></h3>
         <p className="text-gray-500 text-center py-8">No hay items en esta lista</p>
       </div>
     );
@@ -413,14 +492,22 @@ function QuickListCard({ title, items, color, renderItem }: {
 
   return (
     <div className={cn('bg-white border rounded-lg p-6', borderColor[color])}>
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">{title} <span className="text-sm font-normal text-gray-400">({total})</span></h3>
       <div className="space-y-3">
-        {items.map((item: any, idx: number) => (
+        {displayItems.map((item: any, idx: number) => (
           <div key={idx} className="p-3 bg-gray-50 rounded-lg">
             {renderItem(item)}
           </div>
         ))}
       </div>
+      {hasMore && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="mt-3 w-full flex items-center justify-center gap-1 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+        >
+          {expanded ? <><ChevronUp className="h-4 w-4" /> Ver menos</> : <><ChevronDown className="h-4 w-4" /> Ver todos ({items.length})</>}
+        </button>
+      )}
     </div>
   );
 }

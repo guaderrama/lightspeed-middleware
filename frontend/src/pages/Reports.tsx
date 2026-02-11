@@ -1,20 +1,24 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
-import { TrendingUp, DollarSign, ShoppingCart, Clock, CalendarDays, PieChart as PieIcon, BarChart3 } from 'lucide-react';
+import { TrendingUp, DollarSign, ShoppingCart, Clock, CalendarDays, PieChart as PieIcon, BarChart3, Download } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line,
 } from 'recharts';
 import { PeriodSelector, getPeriodDates, type Period } from '@/components/PeriodSelector';
 import { MetricCardWithChange } from '@/components/MetricCardWithChange';
+import { useOutlet } from '@/contexts/OutletContext';
+import { exportMultiSheet } from '@/lib/export-excel';
 
 const COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'];
 
 export function Reports() {
   const [period, setPeriod] = useState<Period>('month');
-  const periodDates = getPeriodDates(period);
-  const [outletId] = useState('1');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const periodDates = getPeriodDates(period, customFrom, customTo);
+  const { outletId } = useOutlet();
 
   const queryParams = { date_from: periodDates.from, date_to: periodDates.to, outlet_id: outletId };
 
@@ -91,10 +95,34 @@ export function Reports() {
           <h1 className="text-3xl font-bold text-gray-900">Reportes de Ventas</h1>
           <p className="text-gray-500 mt-1">Analisis profundo de ventas por periodo</p>
         </div>
+        <button
+          onClick={() => {
+            const sheets = [];
+            if (topProducts?.length) sheets.push({ name: 'Top Productos', data: topProducts });
+            if (hourlySales?.length) sheets.push({ name: 'Ventas por Hora', data: hourlySales });
+            if (weekdaySales?.length) sheets.push({ name: 'Ventas por Dia', data: weekdaySales });
+            if (categorySales?.length) sheets.push({ name: 'Ventas por Categoria', data: categorySales });
+            if (monthlySales?.length) sheets.push({ name: 'Tendencia Mensual', data: monthlySales });
+            if (sheets.length > 0) {
+              exportMultiSheet(sheets, `reporte-ventas-${periodDates.from}-a-${periodDates.to}`);
+            }
+          }}
+          disabled={!topProducts?.length}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Download className="h-4 w-4" />
+          Exportar Excel
+        </button>
       </div>
 
       {/* Period Selector */}
-      <PeriodSelector value={period} onChange={setPeriod} />
+      <PeriodSelector
+        value={period}
+        onChange={setPeriod}
+        customFrom={customFrom}
+        customTo={customTo}
+        onCustomChange={(from, to) => { setCustomFrom(from); setCustomTo(to); }}
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

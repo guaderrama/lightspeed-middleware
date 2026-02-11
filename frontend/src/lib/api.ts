@@ -119,6 +119,14 @@ class ApiClient {
     return this.request<any>(`/reports/sales-comparison?${queryParams}`);
   }
 
+  async getOutlets() {
+    return this.request<any[]>('/analytics/outlets');
+  }
+
+  async getAlerts() {
+    return this.request<any>('/analytics/alerts');
+  }
+
   async getHourlySales(params: { date_from: string; date_to: string; outlet_id: string }) {
     const queryParams = new URLSearchParams(params);
     return this.request<any>(`/reports/sales-hourly?${queryParams}`);

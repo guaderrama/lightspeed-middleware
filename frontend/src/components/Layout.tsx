@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { LayoutDashboard, MessageSquare, FileBarChart } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { OutletSelector } from './OutletSelector';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -20,6 +21,8 @@ export function Layout() {
             Iván Guaderrama Art
           </h1>
         </div>
+
+        <OutletSelector />
 
         <nav className="flex-1 space-y-1 px-3 py-4">
           {navigation.map((item) => {
