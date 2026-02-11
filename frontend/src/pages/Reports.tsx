@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
-import { TrendingUp, DollarSign, ShoppingCart, Clock, CalendarDays, PieChart as PieIcon, BarChart3, Download } from 'lucide-react';
+import { TrendingUp, DollarSign, ShoppingCart, Clock, CalendarDays, PieChart as PieIcon, BarChart3, Download, Package } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line,
@@ -181,6 +181,7 @@ export function Reports() {
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cantidad</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ingreso</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio Prom.</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Variantes</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -193,6 +194,7 @@ export function Reports() {
                       <td className="px-4 py-3 text-sm text-gray-900 text-right">
                         ${product.quantity > 0 ? (product.revenue / product.quantity).toFixed(2) : '0'}
                       </td>
+                      <td className="px-4 py-3 text-sm text-gray-500 text-right">{product.variants ?? 1}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -248,8 +250,8 @@ export function Reports() {
           )}
         </ChartCard>
 
-        {/* Category Sales */}
-        <ChartCard title="Ventas por Producto" icon={PieIcon} loading={loadingCategory}>
+        {/* Category Sales by Revenue */}
+        <ChartCard title="Productos por Ingreso" icon={PieIcon} loading={loadingCategory}>
           {categorySales && categorySales.length > 0 && (
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
@@ -258,7 +260,7 @@ export function Reports() {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${(name ?? '').substring(0, 15)}${(name ?? '').length > 15 ? '...' : ''} (${((percent ?? 0) * 100).toFixed(0)}%)`}
+                  label={({ name, percent }) => `${(name ?? '').substring(0, 18)}${(name ?? '').length > 18 ? '...' : ''} (${((percent ?? 0) * 100).toFixed(0)}%)`}
                   outerRadius={100}
                   dataKey="revenue"
                   nameKey="name"
@@ -271,6 +273,34 @@ export function Reports() {
               </PieChart>
             </ResponsiveContainer>
           )}
+        </ChartCard>
+
+        {/* Category Sales by Quantity */}
+        <ChartCard title="Productos por Cantidad" icon={Package} loading={loadingCategory}>
+          {categorySales && categorySales.length > 0 && (() => {
+            const sortedByQty = [...categorySales].sort((a: any, b: any) => b.quantity - a.quantity);
+            return (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={sortedByQty}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${(name ?? '').substring(0, 18)}${(name ?? '').length > 18 ? '...' : ''} (${((percent ?? 0) * 100).toFixed(0)}%)`}
+                    outerRadius={100}
+                    dataKey="quantity"
+                    nameKey="name"
+                  >
+                    {sortedByQty.map((_: any, idx: number) => (
+                      <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: any) => [value.toLocaleString(), 'Cantidad']} />
+                </PieChart>
+              </ResponsiveContainer>
+            );
+          })()}
         </ChartCard>
 
         {/* Monthly Trend */}

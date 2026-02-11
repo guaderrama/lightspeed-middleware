@@ -257,18 +257,19 @@ export class LightspeedClient {
       }
     }
 
-    // Enrich with product names
-    const sortedProducts = Object.entries(productSales)
+    // Fetch more variants than limit to account for name-based aggregation
+    const fetchLimit = limit * 3;
+    const sortedVariants = Object.entries(productSales)
       .map(([productId, data]) => ({
         productId,
         quantity: data.quantity,
         revenue: parseFloat(data.revenue.toFixed(2)),
       }))
       .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, limit);
+      .slice(0, fetchLimit);
 
-    // Try to get product names
-    for (const product of sortedProducts) {
+    // Enrich with product names
+    for (const product of sortedVariants) {
       try {
         const productData: any = await this.makeRequest(`/products/${product.productId}`);
         if (productData && productData.data) {
@@ -281,7 +282,28 @@ export class LightspeedClient {
       }
     }
 
-    return sortedProducts;
+    // Aggregate variants by product name
+    const nameMap: { [name: string]: { quantity: number; revenue: number; variants: number } } = {};
+    for (const v of sortedVariants) {
+      const name = (v as any).name;
+      if (nameMap[name]) {
+        nameMap[name].quantity += v.quantity;
+        nameMap[name].revenue += v.revenue;
+        nameMap[name].variants += 1;
+      } else {
+        nameMap[name] = { quantity: v.quantity, revenue: v.revenue, variants: 1 };
+      }
+    }
+
+    return Object.entries(nameMap)
+      .map(([name, d]) => ({
+        name,
+        quantity: d.quantity,
+        revenue: parseFloat(d.revenue.toFixed(2)),
+        variants: d.variants,
+      }))
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, limit);
   }
 
   /**
@@ -464,7 +486,7 @@ export class LightspeedClient {
     dateTo: string,
     outletId: string,
     limit: number = 10,
-  ): Promise<{ productId: string; name: string; quantity: number; revenue: number }[]> {
+  ): Promise<{ name: string; quantity: number; revenue: number; variants: number }[]> {
     const productSales: { [key: string]: { quantity: number; revenue: number } } = {};
     let hasMore = true;
     let afterCursor: string | null = null;
@@ -498,13 +520,15 @@ export class LightspeedClient {
       else { hasMore = false; }
     }
 
-    const sorted = Object.entries(productSales)
+    // Fetch more variants than limit to account for name-based aggregation
+    const fetchLimit = limit * 3;
+    const sortedVariants = Object.entries(productSales)
       .map(([productId, d]) => ({ productId, name: productId, quantity: d.quantity, revenue: parseFloat(d.revenue.toFixed(2)) }))
       .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, limit);
+      .slice(0, fetchLimit);
 
     // Enrich with product names
-    for (const product of sorted) {
+    for (const product of sortedVariants) {
       try {
         const productData: any = await this.makeRequest(`/products/${product.productId}`);
         if (productData?.data) {
@@ -513,7 +537,27 @@ export class LightspeedClient {
       } catch { /* keep productId as name */ }
     }
 
-    return sorted;
+    // Aggregate variants by product name
+    const nameMap: { [name: string]: { quantity: number; revenue: number; variants: number } } = {};
+    for (const v of sortedVariants) {
+      if (nameMap[v.name]) {
+        nameMap[v.name].quantity += v.quantity;
+        nameMap[v.name].revenue += v.revenue;
+        nameMap[v.name].variants += 1;
+      } else {
+        nameMap[v.name] = { quantity: v.quantity, revenue: v.revenue, variants: 1 };
+      }
+    }
+
+    return Object.entries(nameMap)
+      .map(([name, d]) => ({
+        name,
+        quantity: d.quantity,
+        revenue: parseFloat(d.revenue.toFixed(2)),
+        variants: d.variants,
+      }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, limit);
   }
 
   /**
