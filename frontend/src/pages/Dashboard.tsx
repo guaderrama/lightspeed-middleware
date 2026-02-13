@@ -20,9 +20,9 @@ export function Dashboard() {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ['inventory-status'],
+    queryKey: ['inventory-status', outletId],
     queryFn: async () => {
-      const response = await apiClient.getInventoryStatus();
+      const response = await apiClient.getInventoryStatus({ outlet_id: outletId });
       return {
         ...response.data,
         _meta: {
@@ -47,7 +47,7 @@ export function Dashboard() {
   });
 
   const handleRefresh = async () => {
-    await apiClient.refreshInventoryAnalysis();
+    await apiClient.refreshInventoryAnalysis({ outlet_id: outletId });
     refetch();
   };
 

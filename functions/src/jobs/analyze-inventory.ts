@@ -4,9 +4,11 @@ import { AnalyticsService } from '../services/analytics';
 import { CacheService } from '../services/cache';
 import { GeminiService } from '../services/gemini';
 
-const analytics = new AnalyticsService();
+const lightspeedToken = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
+const analytics = new AnalyticsService(lightspeedToken);
 const cache = new CacheService();
 const gemini = new GeminiService();
+const DEFAULT_OUTLET_ID = '0242e39e-bf6c-11eb-fc6f-29d74e175f8a';
 
 /**
  * Background job que se ejecuta cada 6 horas
@@ -22,7 +24,7 @@ export const analyzeInventoryJob = onSchedule({
   try {
     // 1. Calcular métricas
     logger.info('Calculating inventory metrics');
-    const analysis = await analytics.calculateMetrics();
+    const analysis = await analytics.calculateMetrics(DEFAULT_OUTLET_ID);
 
     // 2. Detectar problemas críticos
     const criticalCount = analysis.recomendaciones.filter(
@@ -55,7 +57,7 @@ export const analyzeInventoryJob = onSchedule({
     }
 
     // 4. Guardar en caché
-    await cache.set('inventory-analysis', analysis, { ttl: 21600 });  // 6 horas
+    await cache.set(`inventory-analysis-${DEFAULT_OUTLET_ID}`, analysis, { ttl: 21600 });  // 6 horas
 
     logger.info('Inventory analysis completed and cached successfully', {
       expiresIn: '6 hours'

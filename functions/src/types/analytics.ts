@@ -5,7 +5,7 @@ export interface ProductMetrics {
   sku: string;
   name: string;
   category: string;
-  location: 'galeria' | 'bodega';
+  location: string;
 
   // Stock
   stock_actual: number;

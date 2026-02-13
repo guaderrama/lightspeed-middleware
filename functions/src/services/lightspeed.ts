@@ -733,6 +733,190 @@ export class LightspeedClient {
   }
 
   /**
+   * Get all products from Lightspeed.
+   * Uses version-based pagination on /products endpoint.
+   * NOTE: Inventory is NOT included - use getInventoryMap() separately.
+   */
+  public async getProducts(): Promise<{
+    id: string;
+    name: string;
+    sku: string;
+    supply_price: number;
+    retail_price: number;
+    category_name: string;
+    tag_ids: string[];
+    active: boolean;
+    variant_count: number;
+  }[]> {
+    const products: any[] = [];
+    let hasMore = true;
+    let afterVersion: number | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({ page_size: pageSize.toString() });
+      if (afterVersion) params.set("after", String(afterVersion));
+
+      const data: any = await this.makeRequest("/products", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      let lastVersion = 0;
+      for (const product of data.data) {
+        if (product.active === false || product.deleted_at) continue;
+
+        // Track version for pagination
+        if (product.version && product.version > lastVersion) {
+          lastVersion = product.version;
+        }
+
+        // Extract category from product_category or categories
+        let categoryName = "";
+        if (product.product_category?.name) {
+          categoryName = product.product_category.name;
+        } else if (product.categories?.length > 0) {
+          categoryName = product.categories[0].name || "";
+        }
+
+        products.push({
+          id: product.id,
+          name: product.name || product.handle || product.id,
+          sku: product.sku || "",
+          supply_price: parseFloat(product.supply_price || "0"),
+          retail_price: parseFloat(product.price_including_tax || product.price_excluding_tax || "0"),
+          category_name: categoryName,
+          tag_ids: product.tag_ids || [],
+          active: true,
+          variant_count: product.variant_count || 1,
+        });
+      }
+
+      // Version-based pagination: if we got a full page, there might be more
+      if (data.data.length >= pageSize && lastVersion > 0) {
+        afterVersion = lastVersion;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    functions.logger.info(`Fetched ${products.length} active products from Lightspeed`);
+    return products;
+  }
+
+  /**
+   * Get inventory levels for all products at a specific outlet.
+   * Uses the bulk /inventory endpoint with version-based pagination.
+   * Returns a Map of product_id -> { inventory_level, reorder_point, reorder_amount }
+   */
+  public async getInventoryMap(outletId: string): Promise<Map<string, {
+    inventory_level: number;
+    reorder_point: number;
+    reorder_amount: number;
+  }>> {
+    const inventoryMap = new Map<string, {
+      inventory_level: number;
+      reorder_point: number;
+      reorder_amount: number;
+    }>();
+    let hasMore = true;
+    let afterVersion: number | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        page_size: pageSize.toString(),
+      });
+      if (afterVersion) params.set("after", String(afterVersion));
+
+      const data: any = await this.makeRequest("/inventory", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      let lastVersion = 0;
+      for (const inv of data.data) {
+        if (inv.deleted_at) continue;
+        if (inv.version && inv.version > lastVersion) lastVersion = inv.version;
+
+        // Only include inventory for the requested outlet
+        if (inv.outlet_id === outletId) {
+          inventoryMap.set(inv.product_id, {
+            inventory_level: inv.inventory_level ?? inv.current_amount ?? 0,
+            reorder_point: inv.reorder_point ?? 0,
+            reorder_amount: inv.reorder_amount ?? 0,
+          });
+        }
+      }
+
+      // Version-based pagination
+      if (data.version?.max && data.data.length >= pageSize) {
+        afterVersion = data.version.max;
+      } else if (data.data.length >= pageSize && lastVersion > 0) {
+        afterVersion = lastVersion;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    functions.logger.info(`Fetched inventory for ${inventoryMap.size} products at outlet ${outletId}`);
+    return inventoryMap;
+  }
+
+  /**
+   * Get per-product sales velocity map for a given period.
+   * Returns a map of product_id -> { quantity_sold, revenue, last_sale_date }.
+   * Used to calculate ABC classification, ROP, coverage days.
+   */
+  public async getProductSalesMap(
+    dateFrom: string,
+    dateTo: string,
+    outletId: string,
+  ): Promise<Map<string, { quantity_sold: number; revenue: number; last_sale_date: string }>> {
+    const salesMap = new Map<string, { quantity_sold: number; revenue: number; last_sale_date: string }>();
+    let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales", outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        limit: pageSize.toString(), status: "CLOSED",
+      });
+      if (afterCursor) params.set("after", afterCursor);
+
+      const data: any = await this.makeRequest("/search", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      for (const sale of data.data) {
+        if (sale.status !== "CLOSED" || !sale.line_items) continue;
+        const saleDate = sale.sale_date || sale.created_at || "";
+
+        for (const line of sale.line_items) {
+          if (!line.product_id || line.is_return || line.quantity <= 0) continue;
+
+          const pid = line.product_id;
+          const existing = salesMap.get(pid);
+          if (existing) {
+            existing.quantity_sold += line.quantity;
+            existing.revenue += (line.price_total || 0);
+            if (saleDate > existing.last_sale_date) existing.last_sale_date = saleDate;
+          } else {
+            salesMap.set(pid, {
+              quantity_sold: line.quantity,
+              revenue: line.price_total || 0,
+              last_sale_date: saleDate,
+            });
+          }
+        }
+      }
+
+      if (data.page_info?.has_next_page) { afterCursor = data.page_info.end_cursor; }
+      else { hasMore = false; }
+    }
+
+    functions.logger.info(`Built sales map for ${salesMap.size} products`);
+    return salesMap;
+  }
+
+  /**
    * Get returns summary from sales data.
    * Scans line_items for returns (is_return=true or quantity<0).
    */

@@ -56,12 +56,18 @@ class ApiClient {
     }
   }
 
-  async getInventoryStatus() {
-    return this.request<any>('/analytics/inventory-status');
+  async getInventoryStatus(params?: { outlet_id?: string }) {
+    const queryParams = params?.outlet_id
+      ? `?outlet_id=${encodeURIComponent(params.outlet_id)}`
+      : '';
+    return this.request<any>(`/analytics/inventory-status${queryParams}`);
   }
 
-  async refreshInventoryAnalysis() {
-    return this.request<any>('/analytics/refresh', {
+  async refreshInventoryAnalysis(params?: { outlet_id?: string }) {
+    const queryParams = params?.outlet_id
+      ? `?outlet_id=${encodeURIComponent(params.outlet_id)}`
+      : '';
+    return this.request<any>(`/analytics/refresh${queryParams}`, {
       method: 'POST',
     });
   }
