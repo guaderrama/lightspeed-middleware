@@ -610,4 +610,217 @@ export class LightspeedClient {
       }))
       .sort((a, b) => a.month.localeCompare(b.month));
   }
+
+  /**
+   * Get customer analytics from sales data.
+   * Groups sales by customer_id to calculate spend, visits, and segmentation.
+   */
+  public async getCustomerAnalytics(
+    dateFrom: string,
+    dateTo: string,
+    outletId: string,
+    topLimit: number = 20,
+  ): Promise<{
+    total_customers: number;
+    new_customers: number;
+    returning_customers: number;
+    total_revenue: number;
+    avg_spend_per_customer: number;
+    segments: { name: string; count: number; revenue: number }[];
+    top_customers: {
+      name: string;
+      total_spent: number;
+      visits: number;
+      avg_ticket: number;
+      last_purchase: string;
+    }[];
+  }> {
+    const customers: { [id: string]: {
+      name: string;
+      total_spent: number;
+      visits: number;
+      first_purchase: string;
+      last_purchase: string;
+    }} = {};
+    let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales", outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        limit: pageSize.toString(), status: "CLOSED",
+      });
+      if (afterCursor) params.set("after", afterCursor);
+
+      const data: any = await this.makeRequest("/search", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      for (const sale of data.data) {
+        if (sale.status !== "CLOSED") continue;
+        const customerId = sale.customer_id || "anonymous";
+        const customerName = sale.customer_name || "Cliente Sin Nombre";
+        const saleDate = sale.sale_date || sale.created_at || "";
+        const amount = sale.total_price || 0;
+
+        if (!customers[customerId]) {
+          customers[customerId] = {
+            name: customerName,
+            total_spent: 0,
+            visits: 0,
+            first_purchase: saleDate,
+            last_purchase: saleDate,
+          };
+        }
+
+        customers[customerId].total_spent += amount;
+        customers[customerId].visits += 1;
+        if (saleDate < customers[customerId].first_purchase) {
+          customers[customerId].first_purchase = saleDate;
+        }
+        if (saleDate > customers[customerId].last_purchase) {
+          customers[customerId].last_purchase = saleDate;
+        }
+      }
+
+      if (data.page_info?.has_next_page) { afterCursor = data.page_info.end_cursor; }
+      else { hasMore = false; }
+    }
+
+    // Build results
+    const allCustomers = Object.entries(customers)
+      .filter(([id]) => id !== "anonymous")
+      .map(([, c]) => ({
+        name: c.name,
+        total_spent: parseFloat(c.total_spent.toFixed(2)),
+        visits: c.visits,
+        avg_ticket: c.visits > 0 ? parseFloat((c.total_spent / c.visits).toFixed(2)) : 0,
+        last_purchase: c.last_purchase,
+        first_purchase: c.first_purchase,
+      }));
+
+    const totalCustomers = allCustomers.length;
+    const totalRevenue = allCustomers.reduce((sum, c) => sum + c.total_spent, 0);
+
+    // Segment: VIP (>$5K), Regular ($1K-$5K), Occasional (<$1K)
+    const vip = allCustomers.filter(c => c.total_spent >= 5000);
+    const regular = allCustomers.filter(c => c.total_spent >= 1000 && c.total_spent < 5000);
+    const occasional = allCustomers.filter(c => c.total_spent < 1000);
+
+    // New = only 1 visit in period, Returning = 2+ visits
+    const newCustomers = allCustomers.filter(c => c.visits === 1).length;
+    const returningCustomers = allCustomers.filter(c => c.visits >= 2).length;
+
+    const topCustomers = [...allCustomers]
+      .sort((a, b) => b.total_spent - a.total_spent)
+      .slice(0, topLimit)
+      .map(({ first_purchase, ...rest }) => rest);
+
+    return {
+      total_customers: totalCustomers,
+      new_customers: newCustomers,
+      returning_customers: returningCustomers,
+      total_revenue: parseFloat(totalRevenue.toFixed(2)),
+      avg_spend_per_customer: totalCustomers > 0 ? parseFloat((totalRevenue / totalCustomers).toFixed(2)) : 0,
+      segments: [
+        { name: "VIP (>$5K)", count: vip.length, revenue: parseFloat(vip.reduce((s, c) => s + c.total_spent, 0).toFixed(2)) },
+        { name: "Regular ($1K-$5K)", count: regular.length, revenue: parseFloat(regular.reduce((s, c) => s + c.total_spent, 0).toFixed(2)) },
+        { name: "Ocasional (<$1K)", count: occasional.length, revenue: parseFloat(occasional.reduce((s, c) => s + c.total_spent, 0).toFixed(2)) },
+      ],
+      top_customers: topCustomers,
+    };
+  }
+
+  /**
+   * Get returns summary from sales data.
+   * Scans line_items for returns (is_return=true or quantity<0).
+   */
+  public async getReturnsSummary(
+    dateFrom: string,
+    dateTo: string,
+    outletId: string,
+  ): Promise<{
+    total_returns_value: number;
+    total_returns_count: number;
+    total_sales_value: number;
+    total_sales_count: number;
+    return_rate_value: number;
+    return_rate_count: number;
+    top_returned_products: { product_id: string; name: string; quantity: number; value: number }[];
+  }> {
+    const returnedProducts: { [pid: string]: { quantity: number; value: number } } = {};
+    let totalReturnsValue = 0;
+    let totalReturnsCount = 0;
+    let totalSalesValue = 0;
+    let totalSalesCount = 0;
+    let hasMore = true;
+    let afterCursor: string | null = null;
+    const pageSize = 200;
+
+    while (hasMore) {
+      const params = new URLSearchParams({
+        type: "sales", outlet_id: outletId,
+        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        limit: pageSize.toString(), status: "CLOSED",
+      });
+      if (afterCursor) params.set("after", afterCursor);
+
+      const data: any = await this.makeRequest("/search", params);
+      if (!data?.data?.length) { hasMore = false; break; }
+
+      for (const sale of data.data) {
+        if (sale.status !== "CLOSED") continue;
+        totalSalesValue += sale.total_price || 0;
+        totalSalesCount += 1;
+
+        if (sale.line_items) {
+          for (const line of sale.line_items) {
+            if (line.is_return || line.quantity < 0) {
+              const returnValue = Math.abs(line.price_total || 0);
+              const returnQty = Math.abs(line.quantity || 1);
+              totalReturnsValue += returnValue;
+              totalReturnsCount += returnQty;
+
+              const pid = line.product_id || "unknown";
+              if (!returnedProducts[pid]) returnedProducts[pid] = { quantity: 0, value: 0 };
+              returnedProducts[pid].quantity += returnQty;
+              returnedProducts[pid].value += returnValue;
+            }
+          }
+        }
+      }
+
+      if (data.page_info?.has_next_page) { afterCursor = data.page_info.end_cursor; }
+      else { hasMore = false; }
+    }
+
+    // Get top returned products with names
+    const topReturned = Object.entries(returnedProducts)
+      .map(([pid, d]) => ({ product_id: pid, name: pid, quantity: d.quantity, value: parseFloat(d.value.toFixed(2)) }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+
+    for (const product of topReturned) {
+      if (product.product_id === "unknown") { product.name = "Desconocido"; continue; }
+      try {
+        const productData: any = await this.makeRequest(`/products/${product.product_id}`);
+        if (productData?.data) {
+          product.name = productData.data.name || productData.data.handle || product.product_id;
+        }
+      } catch { /* keep pid as name */ }
+    }
+
+    const grossSales = Math.abs(totalSalesValue) + totalReturnsValue;
+
+    return {
+      total_returns_value: parseFloat(totalReturnsValue.toFixed(2)),
+      total_returns_count: totalReturnsCount,
+      total_sales_value: parseFloat(totalSalesValue.toFixed(2)),
+      total_sales_count: totalSalesCount,
+      return_rate_value: grossSales > 0 ? parseFloat(((totalReturnsValue / grossSales) * 100).toFixed(2)) : 0,
+      return_rate_count: totalSalesCount > 0 ? parseFloat(((totalReturnsCount / totalSalesCount) * 100).toFixed(2)) : 0,
+      top_returned_products: topReturned,
+    };
+  }
 }

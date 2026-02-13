@@ -208,9 +208,11 @@ export function Reports() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Hourly Sales */}
         <ChartCard title="Ventas por Hora del Dia" icon={Clock} loading={loadingHourly}>
-          {hourlySales && hourlySales.length > 0 && (
+          {hourlySales && hourlySales.length > 0 && (() => {
+            const storeHours = hourlySales.filter((h: any) => h.hour >= 8 && h.hour <= 22);
+            return (
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={hourlySales}>
+              <BarChart data={storeHours}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="hour" tickFormatter={(h) => `${h}:00`} tick={{ fontSize: 11 }} />
                 <YAxis tickFormatter={(v) => `$${v}`} />
@@ -224,7 +226,8 @@ export function Reports() {
                 <Bar dataKey="amount" fill="#8b5cf6" name="Ventas" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          )}
+            );
+          })()}
         </ChartCard>
 
         {/* Weekday Sales */}

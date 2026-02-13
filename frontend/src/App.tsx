@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { Chat } from './pages/Chat';
 import { Reports } from './pages/Reports';
+import { Customers } from './pages/Customers';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,6 +27,7 @@ function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="chat" element={<Chat />} />
               <Route path="reports" element={<Reports />} />
+              <Route path="customers" element={<Customers />} />
             </Route>
           </Routes>
         </OutletProvider>

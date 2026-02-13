@@ -1,8 +1,7 @@
-import { useState } from 'react';
 import { Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type Period = 'week' | 'month' | '3months' | 'custom';
+export type Period = 'today' | 'week' | 'month' | '3months' | 'custom';
 
 interface PeriodSelectorProps {
   value: Period;
@@ -17,6 +16,7 @@ export function PeriodSelector({ value, onChange, customFrom, customTo, onCustom
   const today = new Date().toISOString().split('T')[0];
 
   const periods: { value: Period; label: string }[] = [
+    { value: 'today', label: 'Hoy' },
     { value: 'week', label: 'Esta Semana' },
     { value: 'month', label: 'Este Mes' },
     { value: '3months', label: 'Últimos 3 Meses' },
@@ -80,6 +80,9 @@ export function getPeriodDates(period: Period, customFrom?: string, customTo?: s
   let from: Date;
 
   switch (period) {
+    case 'today':
+      from = new Date(today);
+      break;
     case 'week':
       from = new Date(today);
       from.setDate(today.getDate() - 7);

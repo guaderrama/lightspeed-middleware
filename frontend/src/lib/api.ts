@@ -146,6 +146,26 @@ class ApiClient {
     const queryParams = new URLSearchParams(params);
     return this.request<any>(`/reports/sales-monthly?${queryParams}`);
   }
+
+  async getCustomerAnalytics(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/customers/analytics?${queryParams}`);
+  }
+
+  async getTopCustomers(params: { date_from: string; date_to: string; outlet_id: string; limit?: number }) {
+    const queryParams = new URLSearchParams({
+      date_from: params.date_from,
+      date_to: params.date_to,
+      outlet_id: params.outlet_id,
+      limit: String(params.limit ?? 20),
+    });
+    return this.request<any>(`/customers/top?${queryParams}`);
+  }
+
+  async getReturnsSummary(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/customers/returns-summary?${queryParams}`);
+  }
 }
 
 export const apiClient = new ApiClient(API_BASE_URL, API_KEY);

@@ -6,6 +6,7 @@ import express from "express";
 import analyticsRoutes from "./routes/analytics";
 import chatRoutes from "./routes/chat";
 import reportsRoutes from "./routes/reports";
+import customersRoutes from "./routes/customers";
 
 // Export background jobs
 export { analyzeInventoryJob } from "./jobs/analyze-inventory";
@@ -146,6 +147,7 @@ app.get("/health", (req: express.Request, res: express.Response) => {
 app.use("/analytics", analyticsRoutes);
 app.use("/chat", chatRoutes);
 app.use("/reports", reportsRoutes);
+app.use("/customers", customersRoutes);
 
 // Export API
 export const api = onRequest({secrets}, app);

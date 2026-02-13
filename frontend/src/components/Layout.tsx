@@ -1,12 +1,13 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, MessageSquare, FileBarChart } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, FileBarChart, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OutletSelector } from './OutletSelector';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Chat IA', href: '/chat', icon: MessageSquare },
+  { name: 'Clientes', href: '/customers', icon: Users },
   { name: 'Reportes', href: '/reports', icon: FileBarChart },
+  { name: 'Chat IA', href: '/chat', icon: MessageSquare },
 ];
 
 export function Layout() {
