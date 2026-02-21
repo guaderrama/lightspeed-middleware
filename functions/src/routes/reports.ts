@@ -312,4 +312,101 @@ router.get('/sales-monthly', async (req: express.Request, res: express.Response)
   }
 });
 
+/**
+ * GET /reports/seasonal-comparison
+ * Year-over-year monthly comparison (current period vs same period last year)
+ */
+router.get('/seasonal-comparison', async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId;
+  const { date_from, date_to, outlet_id } = req.query as any;
+
+  try {
+    if (!date_from || !date_to || !outlet_id) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Missing required parameters: date_from, date_to, outlet_id' },
+        meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+      });
+    }
+
+    const resolvedOutletId = await resolveOutletId(outlet_id as string);
+
+    // Calculate previous year dates
+    const currentFrom = new Date(date_from);
+    const currentTo = new Date(date_to);
+    const prevFrom = new Date(currentFrom);
+    prevFrom.setFullYear(prevFrom.getFullYear() - 1);
+    const prevTo = new Date(currentTo);
+    prevTo.setFullYear(prevTo.getFullYear() - 1);
+
+    const prevFromStr = prevFrom.toISOString().substring(0, 10);
+    const prevToStr = prevTo.toISOString().substring(0, 10);
+
+    const currentYear = currentFrom.getFullYear();
+    const previousYear = prevFrom.getFullYear();
+
+    // Fetch both periods in parallel
+    const [currentMonthly, previousMonthly] = await Promise.all([
+      lightspeedClient.getMonthlySales(date_from, date_to, resolvedOutletId),
+      lightspeedClient.getMonthlySales(prevFromStr, prevToStr, resolvedOutletId),
+    ]);
+
+    // Build comparison aligned by month
+    const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const prevMap = new Map((previousMonthly || []).map((m: any) => {
+      const monthNum = parseInt(m.month.split('-')[1]);
+      return [monthNum, m];
+    }));
+
+    const comparison = (currentMonthly || []).map((m: any) => {
+      const monthNum = parseInt(m.month.split('-')[1]);
+      const prev = prevMap.get(monthNum);
+      const prevAmount = prev?.amount ?? 0;
+      const changePct = prevAmount > 0 ? ((m.amount - prevAmount) / prevAmount) * 100 : (m.amount > 0 ? 100 : 0);
+
+      return {
+        month: monthNum,
+        month_name: MONTH_NAMES[monthNum - 1] || `M${monthNum}`,
+        current_amount: m.amount,
+        previous_amount: prevAmount,
+        change_pct: Math.round(changePct * 10) / 10,
+        current_tickets: m.tickets,
+        previous_tickets: prev?.tickets ?? 0,
+      };
+    });
+
+    const currentTotal = comparison.reduce((s: number, c: any) => s + c.current_amount, 0);
+    const previousTotal = comparison.reduce((s: number, c: any) => s + c.previous_amount, 0);
+    const yoyChange = previousTotal > 0 ? ((currentTotal - previousTotal) / previousTotal) * 100 : (currentTotal > 0 ? 100 : 0);
+
+    const bestMonth = comparison.length > 0
+      ? comparison.reduce((best: any, c: any) => c.current_amount > best.current_amount ? c : best).month_name
+      : '';
+    const worstMonth = comparison.length > 0
+      ? comparison.reduce((worst: any, c: any) => c.current_amount < worst.current_amount ? c : worst).month_name
+      : '';
+
+    return res.status(200).json({
+      data: {
+        current_year: { year: currentYear, months: currentMonthly },
+        previous_year: { year: previousYear, months: previousMonthly },
+        comparison,
+        summary: {
+          current_total: Math.round(currentTotal * 100) / 100,
+          previous_total: Math.round(previousTotal * 100) / 100,
+          yoy_change_pct: Math.round(yoyChange * 10) / 10,
+          best_month: bestMonth,
+          worst_month: worstMonth,
+        },
+      },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId, version: '2.0.0' }
+    });
+  } catch (error: any) {
+    logger.error('Error in seasonal-comparison', { correlationId, error: error.message });
+    return res.status(500).json({
+      error: { code: 'INTERNAL_ERROR', message: error.message },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+});
+
 export default router;

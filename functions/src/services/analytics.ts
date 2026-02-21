@@ -1,6 +1,10 @@
 import * as logger from 'firebase-functions/logger';
 import { LightspeedClient } from './lightspeed';
-import { InventoryAnalysis, ProductMetrics, CriticalIssue } from '../types/analytics';
+import {
+  InventoryAnalysis, ProductMetrics, CriticalIssue,
+  ProfitAnalysis, ProductProfit, CategoryProfit, MarginBucket,
+  CategoryIntelligence, CategoryDetail,
+} from '../types/analytics';
 
 export class AnalyticsService {
   private lightspeedClient: LightspeedClient;
@@ -293,6 +297,222 @@ export class AnalyticsService {
       const prioridadOrder = { alta: 0, media: 1, baja: 2 };
       return prioridadOrder[a.prioridad] - prioridadOrder[b.prioridad];
     });
+  }
+
+  /**
+   * FASE 6: Profit analysis for a date range.
+   * Reuses cached calculateMetrics() + fetches period-specific sales.
+   */
+  async getProfitAnalysis(outletId: string, dateFrom: string, dateTo: string): Promise<ProfitAnalysis> {
+    logger.info('Calculating profit analysis', { outletId, dateFrom, dateTo });
+
+    // Reuse cached inventory metrics for product data (costo, precio, abc_class, category)
+    const analysis = await this.calculateMetrics(outletId);
+    const metricsMap = new Map(analysis.metricas.map((m) => [m.product_id, m]));
+
+    // Fetch period-specific sales
+    const salesMap = await this.lightspeedClient.getProductSalesMap(dateFrom, dateTo, outletId);
+
+    // Build per-product profit data
+    const productProfits: ProductProfit[] = [];
+    let totalRevenue = 0;
+    let totalCost = 0;
+    let marginSum = 0;
+    let productsWithCost = 0;
+
+    for (const [productId, sales] of salesMap.entries()) {
+      const metric = metricsMap.get(productId);
+      if (!metric || sales.quantity_sold <= 0) continue;
+
+      const costo = metric.costo;
+      const precio = metric.precio;
+      const profitPerUnit = precio - costo;
+      const prodRevenue = sales.revenue > 0 ? sales.revenue : precio * sales.quantity_sold;
+      const prodCost = costo * sales.quantity_sold;
+      const prodProfit = prodRevenue - prodCost;
+      const marginPct = precio > 0 && costo > 0 ? ((precio - costo) / precio) * 100 : 0;
+
+      if (costo > 0) {
+        productsWithCost++;
+        marginSum += marginPct;
+      }
+
+      totalRevenue += prodRevenue;
+      totalCost += prodCost;
+
+      productProfits.push({
+        product_id: productId,
+        name: metric.name,
+        category: metric.category,
+        precio,
+        costo,
+        margin_pct: Math.round(marginPct * 10) / 10,
+        quantity_sold: sales.quantity_sold,
+        total_revenue: Math.round(prodRevenue * 100) / 100,
+        total_cost: Math.round(prodCost * 100) / 100,
+        total_profit: Math.round(prodProfit * 100) / 100,
+        abc_class: metric.abc_class,
+      });
+    }
+
+    // Aggregations
+    const totalProfit = totalRevenue - totalCost;
+    const avgMargin = productsWithCost > 0 ? marginSum / productsWithCost : 0;
+
+    // By category
+    const catMap = new Map<string, CategoryProfit>();
+    for (const pp of productProfits) {
+      const cat = pp.category || 'Sin categoria';
+      const existing = catMap.get(cat) || {
+        category: cat, product_count: 0, total_revenue: 0,
+        total_cost: 0, total_profit: 0, avg_margin_pct: 0, quantity_sold: 0,
+      };
+      existing.product_count++;
+      existing.total_revenue += pp.total_revenue;
+      existing.total_cost += pp.total_cost;
+      existing.total_profit += pp.total_profit;
+      existing.quantity_sold += pp.quantity_sold;
+      catMap.set(cat, existing);
+    }
+    const byCategory = Array.from(catMap.values())
+      .map((c) => ({
+        ...c,
+        total_revenue: Math.round(c.total_revenue * 100) / 100,
+        total_cost: Math.round(c.total_cost * 100) / 100,
+        total_profit: Math.round(c.total_profit * 100) / 100,
+        avg_margin_pct: c.total_revenue > 0
+          ? Math.round(((c.total_revenue - c.total_cost) / c.total_revenue) * 1000) / 10
+          : 0,
+      }))
+      .sort((a, b) => b.total_profit - a.total_profit);
+
+    // Top by profit
+    const topByProfit = [...productProfits]
+      .sort((a, b) => b.total_profit - a.total_profit)
+      .slice(0, 20);
+
+    // Best/worst margins (only products with costo > 0 and sales)
+    const withCostData = productProfits.filter((p) => p.costo > 0);
+    const bestMargins = [...withCostData]
+      .sort((a, b) => b.margin_pct - a.margin_pct)
+      .slice(0, 10);
+    const worstMargins = [...withCostData]
+      .sort((a, b) => a.margin_pct - b.margin_pct)
+      .slice(0, 10);
+
+    // Margin distribution buckets
+    const buckets: MarginBucket[] = [
+      { range: '0-20%', min: 0, max: 20, count: 0, total_profit: 0 },
+      { range: '20-40%', min: 20, max: 40, count: 0, total_profit: 0 },
+      { range: '40-60%', min: 40, max: 60, count: 0, total_profit: 0 },
+      { range: '60-80%', min: 60, max: 80, count: 0, total_profit: 0 },
+      { range: '80-100%', min: 80, max: 100, count: 0, total_profit: 0 },
+    ];
+    for (const pp of withCostData) {
+      const bucket = buckets.find((b) => pp.margin_pct >= b.min && pp.margin_pct < b.max)
+        || buckets[buckets.length - 1];
+      bucket.count++;
+      bucket.total_profit += pp.total_profit;
+    }
+    buckets.forEach((b) => { b.total_profit = Math.round(b.total_profit * 100) / 100; });
+
+    return {
+      period: { from: dateFrom, to: dateTo },
+      outlet_id: outletId,
+      totals: {
+        total_revenue: Math.round(totalRevenue * 100) / 100,
+        total_cost: Math.round(totalCost * 100) / 100,
+        total_profit: Math.round(totalProfit * 100) / 100,
+        avg_margin_pct: Math.round(avgMargin * 10) / 10,
+        products_with_sales: productProfits.length,
+        products_with_cost_data: productsWithCost,
+      },
+      by_category: byCategory,
+      top_by_profit: topByProfit,
+      best_margins: bestMargins,
+      worst_margins: worstMargins,
+      margin_distribution: buckets,
+    };
+  }
+
+  /**
+   * FASE 6: Category intelligence - deep metrics per product category.
+   */
+  async getCategoryIntelligence(outletId: string, dateFrom: string, dateTo: string): Promise<CategoryIntelligence> {
+    logger.info('Calculating category intelligence', { outletId, dateFrom, dateTo });
+
+    const analysis = await this.calculateMetrics(outletId);
+    const salesMap = await this.lightspeedClient.getProductSalesMap(dateFrom, dateTo, outletId);
+
+    // Group metrics by category
+    const catMap = new Map<string, {
+      metrics: ProductMetrics[];
+      totalRevenue: number;
+      totalCost: number;
+      totalQty: number;
+      topProduct: { name: string; revenue: number };
+    }>();
+
+    for (const m of analysis.metricas) {
+      const cat = m.category || 'Sin categoria';
+      if (!catMap.has(cat)) {
+        catMap.set(cat, { metrics: [], totalRevenue: 0, totalCost: 0, totalQty: 0, topProduct: { name: '', revenue: 0 } });
+      }
+      const entry = catMap.get(cat)!;
+      entry.metrics.push(m);
+
+      const sales = salesMap.get(m.product_id);
+      if (sales && sales.quantity_sold > 0) {
+        const rev = sales.revenue > 0 ? sales.revenue : m.precio * sales.quantity_sold;
+        entry.totalRevenue += rev;
+        entry.totalCost += m.costo * sales.quantity_sold;
+        entry.totalQty += sales.quantity_sold;
+        if (rev > entry.topProduct.revenue) {
+          entry.topProduct = { name: m.name, revenue: Math.round(rev * 100) / 100 };
+        }
+      }
+    }
+
+    const categories: CategoryDetail[] = Array.from(catMap.entries()).map(([cat, data]) => {
+      const profit = data.totalRevenue - data.totalCost;
+      const avgMargin = data.totalRevenue > 0
+        ? ((data.totalRevenue - data.totalCost) / data.totalRevenue) * 100
+        : 0;
+      const invValue = data.metrics.reduce((s, m) => s + m.stock_actual * m.costo, 0);
+      const invUnits = data.metrics.reduce((s, m) => s + m.stock_actual, 0);
+      const withStock = data.metrics.filter((m) => m.stock_actual > 0).length;
+      const withSales = data.metrics.filter((m) => salesMap.has(m.product_id)).length;
+      const coverages = data.metrics.filter((m) => m.cobertura_dias < 999 && m.cobertura_dias > 0);
+      const avgCov = coverages.length > 0
+        ? coverages.reduce((s, m) => s + m.cobertura_dias, 0) / coverages.length
+        : 0;
+
+      return {
+        category: cat,
+        product_count: data.metrics.length,
+        products_with_stock: withStock,
+        products_with_sales: withSales,
+        total_revenue: Math.round(data.totalRevenue * 100) / 100,
+        total_cost: Math.round(data.totalCost * 100) / 100,
+        total_profit: Math.round(profit * 100) / 100,
+        avg_margin_pct: Math.round(avgMargin * 10) / 10,
+        inventory_value: Math.round(invValue * 100) / 100,
+        inventory_units: invUnits,
+        quantity_sold: data.totalQty,
+        abc_distribution: {
+          A: data.metrics.filter((m) => m.abc_class === 'A').length,
+          B: data.metrics.filter((m) => m.abc_class === 'B').length,
+          C: data.metrics.filter((m) => m.abc_class === 'C').length,
+        },
+        top_product: data.topProduct,
+      };
+    }).sort((a, b) => b.total_revenue - a.total_revenue);
+
+    return {
+      period: { from: dateFrom, to: dateTo },
+      total_categories: categories.length,
+      categories,
+    };
   }
 
   /**

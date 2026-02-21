@@ -172,6 +172,21 @@ class ApiClient {
     const queryParams = new URLSearchParams(params);
     return this.request<any>(`/customers/returns-summary?${queryParams}`);
   }
+
+  async getProfitAnalysis(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/analytics/profit-analysis?${queryParams}`);
+  }
+
+  async getCategoryIntelligence(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/analytics/category-intelligence?${queryParams}`);
+  }
+
+  async getSeasonalComparison(params: { date_from: string; date_to: string; outlet_id: string }) {
+    const queryParams = new URLSearchParams(params);
+    return this.request<any>(`/reports/seasonal-comparison?${queryParams}`);
+  }
 }
 
 export const apiClient = new ApiClient(API_BASE_URL, API_KEY);

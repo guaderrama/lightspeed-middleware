@@ -6,6 +6,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Chat } from './pages/Chat';
 import { Reports } from './pages/Reports';
 import { Customers } from './pages/Customers';
+import { Profitability } from './pages/Profitability';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,6 +29,7 @@ function App() {
               <Route path="chat" element={<Chat />} />
               <Route path="reports" element={<Reports />} />
               <Route path="customers" element={<Customers />} />
+              <Route path="profitability" element={<Profitability />} />
             </Route>
           </Routes>
         </OutletProvider>

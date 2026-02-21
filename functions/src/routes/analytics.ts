@@ -213,4 +213,86 @@ router.get('/alerts', async (req: express.Request, res: express.Response) => {
   }
 });
 
+/**
+ * GET /analytics/profit-analysis
+ * Returns profit/margin analysis for a date range
+ */
+router.get('/profit-analysis', async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || 'unknown';
+  const outletId = resolveOutletId(req);
+  const dateFrom = req.query.date_from as string;
+  const dateTo = req.query.date_to as string;
+
+  if (!dateFrom || !dateTo) {
+    return res.status(400).json({
+      error: { code: 'VALIDATION_ERROR', message: 'Missing required parameters: date_from, date_to' },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+
+  const cacheKey = `profit-analysis-${outletId}-${dateFrom}-${dateTo}`;
+
+  try {
+    let data = await cache.get<any>(cacheKey);
+
+    if (!data) {
+      logger.info('Calculating profit analysis', { correlationId, outletId, dateFrom, dateTo });
+      data = await analytics.getProfitAnalysis(outletId, dateFrom, dateTo);
+      await cache.set(cacheKey, data, { ttl: 7200 }); // 2h cache
+    }
+
+    return res.status(200).json({
+      data,
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId, version: '2.0.0' }
+    });
+  } catch (error: any) {
+    logger.error('Error in profit-analysis', { correlationId, error: error.message });
+    return res.status(500).json({
+      error: { code: 'INTERNAL_ERROR', message: error.message },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+});
+
+/**
+ * GET /analytics/category-intelligence
+ * Returns deep metrics per product category
+ */
+router.get('/category-intelligence', async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || 'unknown';
+  const outletId = resolveOutletId(req);
+  const dateFrom = req.query.date_from as string;
+  const dateTo = req.query.date_to as string;
+
+  if (!dateFrom || !dateTo) {
+    return res.status(400).json({
+      error: { code: 'VALIDATION_ERROR', message: 'Missing required parameters: date_from, date_to' },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+
+  const cacheKey = `category-intelligence-${outletId}-${dateFrom}-${dateTo}`;
+
+  try {
+    let data = await cache.get<any>(cacheKey);
+
+    if (!data) {
+      logger.info('Calculating category intelligence', { correlationId, outletId, dateFrom, dateTo });
+      data = await analytics.getCategoryIntelligence(outletId, dateFrom, dateTo);
+      await cache.set(cacheKey, data, { ttl: 7200 }); // 2h cache
+    }
+
+    return res.status(200).json({
+      data,
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId, version: '2.0.0' }
+    });
+  } catch (error: any) {
+    logger.error('Error in category-intelligence', { correlationId, error: error.message });
+    return res.status(500).json({
+      error: { code: 'INTERNAL_ERROR', message: error.message },
+      meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+    });
+  }
+});
+
 export default router;

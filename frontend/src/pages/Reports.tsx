@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
-import { TrendingUp, DollarSign, ShoppingCart, Clock, CalendarDays, PieChart as PieIcon, BarChart3, Download, Package } from 'lucide-react';
+import { TrendingUp, DollarSign, ShoppingCart, Clock, CalendarDays, PieChart as PieIcon, BarChart3, Download, Package, GitCompareArrows } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line,
@@ -85,6 +85,15 @@ export function Reports() {
     },
   });
 
+  // Seasonal Comparison (Year-over-Year)
+  const { data: seasonalData, isLoading: loadingSeasonal } = useQuery({
+    queryKey: ['seasonal-comparison', periodDates.from, periodDates.to],
+    queryFn: async () => {
+      const response = await apiClient.getSeasonalComparison(queryParams);
+      return response.data;
+    },
+  });
+
   const changes = salesComparison?.changes;
 
   return (
@@ -103,6 +112,7 @@ export function Reports() {
             if (weekdaySales?.length) sheets.push({ name: 'Ventas por Dia', data: weekdaySales });
             if (categorySales?.length) sheets.push({ name: 'Ventas por Categoria', data: categorySales });
             if (monthlySales?.length) sheets.push({ name: 'Tendencia Mensual', data: monthlySales });
+            if (seasonalData?.comparison?.length) sheets.push({ name: 'Comparacion Anual', data: seasonalData.comparison });
             if (sheets.length > 0) {
               exportMultiSheet(sheets, `reporte-ventas-${periodDates.from}-a-${periodDates.to}`);
             }
@@ -323,6 +333,39 @@ export function Reports() {
                 <Line yAxisId="right" type="monotone" dataKey="avg_ticket" stroke="#8b5cf6" strokeWidth={2} name="Ticket Prom." dot={{ r: 4 }} />
               </LineChart>
             </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        {/* Seasonal Comparison (YoY) */}
+        <ChartCard title="Comparacion Anual (vs Ano Anterior)" icon={GitCompareArrows} loading={loadingSeasonal}>
+          {seasonalData?.comparison && seasonalData.comparison.length > 0 && (
+            <>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={seasonalData.comparison}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month_name" tick={{ fontSize: 12 }} />
+                  <YAxis tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                  <Tooltip
+                    formatter={(value: any, name?: string) => [`$${value.toLocaleString()}`, name ?? '']}
+                  />
+                  <Legend />
+                  <Bar dataKey="current_amount" fill="#10b981" name={`${seasonalData.current_year?.year || 'Actual'}`} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="previous_amount" fill="#d1d5db" name={`${seasonalData.previous_year?.year || 'Anterior'}`} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              {seasonalData.summary && (
+                <div className="mt-3 flex items-center gap-4 text-sm">
+                  <span className="text-gray-500">
+                    Cambio YoY: <span className={seasonalData.summary.yoy_change_pct >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
+                      {seasonalData.summary.yoy_change_pct >= 0 ? '+' : ''}{seasonalData.summary.yoy_change_pct}%
+                    </span>
+                  </span>
+                  {seasonalData.summary.best_month && (
+                    <span className="text-gray-500">Mejor mes: <span className="font-medium text-gray-900">{seasonalData.summary.best_month}</span></span>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </ChartCard>
       </div>

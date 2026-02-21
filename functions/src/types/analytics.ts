@@ -94,6 +94,82 @@ export interface InventoryAnalysis {
   ultima_actualizacion: string;
 }
 
+// FASE 6: Profit Analysis types
+
+export interface ProfitAnalysis {
+  period: { from: string; to: string };
+  outlet_id: string;
+  totals: {
+    total_revenue: number;
+    total_cost: number;
+    total_profit: number;
+    avg_margin_pct: number;
+    products_with_sales: number;
+    products_with_cost_data: number;
+  };
+  by_category: CategoryProfit[];
+  top_by_profit: ProductProfit[];
+  best_margins: ProductProfit[];
+  worst_margins: ProductProfit[];
+  margin_distribution: MarginBucket[];
+}
+
+export interface CategoryProfit {
+  category: string;
+  product_count: number;
+  total_revenue: number;
+  total_cost: number;
+  total_profit: number;
+  avg_margin_pct: number;
+  quantity_sold: number;
+}
+
+export interface ProductProfit {
+  product_id: string;
+  name: string;
+  category: string;
+  precio: number;
+  costo: number;
+  margin_pct: number;
+  quantity_sold: number;
+  total_revenue: number;
+  total_cost: number;
+  total_profit: number;
+  abc_class: 'A' | 'B' | 'C';
+}
+
+export interface MarginBucket {
+  range: string;
+  min: number;
+  max: number;
+  count: number;
+  total_profit: number;
+}
+
+// FASE 6: Category Intelligence types
+
+export interface CategoryIntelligence {
+  period: { from: string; to: string };
+  total_categories: number;
+  categories: CategoryDetail[];
+}
+
+export interface CategoryDetail {
+  category: string;
+  product_count: number;
+  products_with_stock: number;
+  products_with_sales: number;
+  total_revenue: number;
+  total_cost: number;
+  total_profit: number;
+  avg_margin_pct: number;
+  inventory_value: number;
+  inventory_units: number;
+  quantity_sold: number;
+  abc_distribution: { A: number; B: number; C: number };
+  top_product: { name: string; revenue: number };
+}
+
 export interface ChatContext {
   brand?: string;
   user?: string;
