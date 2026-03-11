@@ -2,25 +2,24 @@ import express from 'express';
 import * as logger from 'firebase-functions/logger';
 import { LightspeedClient } from '../services/lightspeed';
 import { CacheService } from '../services/cache';
+import { resolveOutletId } from '../utils/resolve-outlet';
 
 const router = express.Router();
-const cache = new CacheService();
-const lightspeedClient = new LightspeedClient(process.env.LIGHTSPEED_PERSONAL_TOKEN || '');
 
-async function resolveOutletId(outletId: string): Promise<string> {
-  if (outletId.includes('-') && outletId.length > 10) {
-    return outletId;
+// Lazy initialization — secrets are only available inside the handler at runtime
+let _cache: CacheService | null = null;
+function getCache(): CacheService {
+  if (!_cache) { _cache = new CacheService(); }
+  return _cache;
+}
+
+let _lightspeedClient: LightspeedClient | null = null;
+function getLightspeedClient(): LightspeedClient {
+  if (!_lightspeedClient) {
+    const token = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
+    _lightspeedClient = new LightspeedClient(token);
   }
-  let outlets = await cache.get<any[]>('outlets-list');
-  if (!outlets) {
-    outlets = await lightspeedClient.listOutlets();
-    await cache.set('outlets-list', outlets, { ttl: 3600 });
-  }
-  if (outlets && outlets.length > 0) {
-    logger.info(`Resolved outlet_id '${outletId}' to '${outlets[0].id}' (${outlets[0].name})`);
-    return outlets[0].id;
-  }
-  throw new Error('No outlets found in Lightspeed');
+  return _lightspeedClient;
 }
 
 /**
@@ -40,7 +39,7 @@ router.get('/analytics', async (req: express.Request, res: express.Response) => 
     }
 
     const cacheKey = `customers-analytics-${date_from}-${date_to}-${outlet_id}`;
-    const cached = await cache.get<any>(cacheKey);
+    const cached = await getCache().get<any>(cacheKey);
     if (cached) {
       return res.status(200).json({
         data: cached,
@@ -48,9 +47,9 @@ router.get('/analytics', async (req: express.Request, res: express.Response) => 
       });
     }
 
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const data = await lightspeedClient.getCustomerAnalytics(date_from, date_to, resolvedOutletId);
-    await cache.set(cacheKey, data, { ttl: 7200 }); // 2h cache
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const data = await getLightspeedClient().getCustomerAnalytics(date_from, date_to, resolvedOutletId);
+    await getCache().set(cacheKey, data, { ttl: 7200 }); // 2h cache
 
     return res.status(200).json({
       data,
@@ -59,7 +58,7 @@ router.get('/analytics', async (req: express.Request, res: express.Response) => 
   } catch (error: any) {
     logger.error('Error in customers/analytics', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -83,7 +82,7 @@ router.get('/top', async (req: express.Request, res: express.Response) => {
 
     const topLimit = limit ? parseInt(limit as string) : 20;
     const cacheKey = `customers-top-${date_from}-${date_to}-${outlet_id}-${topLimit}`;
-    const cached = await cache.get<any>(cacheKey);
+    const cached = await getCache().get<any>(cacheKey);
     if (cached) {
       return res.status(200).json({
         data: cached,
@@ -91,9 +90,9 @@ router.get('/top', async (req: express.Request, res: express.Response) => {
       });
     }
 
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const analytics = await lightspeedClient.getCustomerAnalytics(date_from, date_to, resolvedOutletId, topLimit);
-    await cache.set(cacheKey, analytics.top_customers, { ttl: 7200 });
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const analytics = await getLightspeedClient().getCustomerAnalytics(date_from, date_to, resolvedOutletId, topLimit);
+    await getCache().set(cacheKey, analytics.top_customers, { ttl: 7200 });
 
     return res.status(200).json({
       data: analytics.top_customers,
@@ -102,7 +101,7 @@ router.get('/top', async (req: express.Request, res: express.Response) => {
   } catch (error: any) {
     logger.error('Error in customers/top', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -125,7 +124,7 @@ router.get('/returns-summary', async (req: express.Request, res: express.Respons
     }
 
     const cacheKey = `returns-summary-${date_from}-${date_to}-${outlet_id}`;
-    const cached = await cache.get<any>(cacheKey);
+    const cached = await getCache().get<any>(cacheKey);
     if (cached) {
       return res.status(200).json({
         data: cached,
@@ -133,9 +132,9 @@ router.get('/returns-summary', async (req: express.Request, res: express.Respons
       });
     }
 
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const data = await lightspeedClient.getReturnsSummary(date_from, date_to, resolvedOutletId);
-    await cache.set(cacheKey, data, { ttl: 7200 });
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const data = await getLightspeedClient().getReturnsSummary(date_from, date_to, resolvedOutletId);
+    await getCache().set(cacheKey, data, { ttl: 7200 });
 
     return res.status(200).json({
       data,
@@ -144,7 +143,7 @@ router.get('/returns-summary', async (req: express.Request, res: express.Respons
   } catch (error: any) {
     logger.error('Error in customers/returns-summary', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }

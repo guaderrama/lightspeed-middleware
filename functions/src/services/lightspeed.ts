@@ -86,6 +86,41 @@ export class LightspeedClient {
     return await response.json() as T;
   }
 
+  /**
+   * Batch fetch product names in parallel, in chunks of 10 to avoid overloading the API.
+   * Returns a Map of product_id -> { name, sku }.
+   */
+  private async getProductNames(productIds: string[]): Promise<Map<string, { name: string; sku: string }>> {
+    const nameMap = new Map<string, { name: string; sku: string }>();
+    if (productIds.length === 0) return nameMap;
+
+    // Split into chunks of 10 for parallel fetching
+    const chunks: string[][] = [];
+    for (let i = 0; i < productIds.length; i += 10) {
+      chunks.push(productIds.slice(i, i + 10));
+    }
+
+    for (const chunk of chunks) {
+      const results = await Promise.all(
+        chunk.map(async (id) => {
+          try {
+            const data: any = await this.makeRequest(`/products/${id}`);
+            return {
+              id,
+              name: data?.data?.name || data?.data?.handle || `Producto ${id}`,
+              sku: data?.data?.sku || "",
+            };
+          } catch {
+            return { id, name: `Producto ${id}`, sku: "" };
+          }
+        })
+      );
+      results.forEach((r) => nameMap.set(r.id, { name: r.name, sku: r.sku }));
+    }
+
+    return nameMap;
+  }
+
   public async getOutletDetails(outletId: string): Promise<OutletDetails> {
     const data: any = await this.makeRequest(`/outlets/${outletId}`);
     if (!data || !data.data || data.data.length === 0) {
@@ -268,18 +303,13 @@ export class LightspeedClient {
       .sort((a, b) => b.quantity - a.quantity)
       .slice(0, fetchLimit);
 
-    // Enrich with product names
+    // Enrich with product names (batch fetch in parallel)
+    const productIds = sortedVariants.map((p) => p.productId);
+    const productNamesMap = await this.getProductNames(productIds);
     for (const product of sortedVariants) {
-      try {
-        const productData: any = await this.makeRequest(`/products/${product.productId}`);
-        if (productData && productData.data) {
-          (product as any).name = productData.data.name || productData.data.handle || product.productId;
-          (product as any).sku = productData.data.sku || "";
-        }
-      } catch {
-        (product as any).name = product.productId;
-        (product as any).sku = "";
-      }
+      const info = productNamesMap.get(product.productId);
+      (product as any).name = info?.name || `Producto ${product.productId}`;
+      (product as any).sku = info?.sku || "";
     }
 
     // Aggregate variants by product name
@@ -527,14 +557,12 @@ export class LightspeedClient {
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, fetchLimit);
 
-    // Enrich with product names
+    // Enrich with product names (batch fetch in parallel)
+    const categoryProductIds = sortedVariants.map((p) => p.productId);
+    const categoryNamesMap = await this.getProductNames(categoryProductIds);
     for (const product of sortedVariants) {
-      try {
-        const productData: any = await this.makeRequest(`/products/${product.productId}`);
-        if (productData?.data) {
-          product.name = productData.data.name || productData.data.handle || product.productId;
-        }
-      } catch { /* keep productId as name */ }
+      const info = categoryNamesMap.get(product.productId);
+      product.name = info?.name || `Producto ${product.productId}`;
     }
 
     // Aggregate variants by product name
@@ -985,14 +1013,15 @@ export class LightspeedClient {
       .sort((a, b) => b.value - a.value)
       .slice(0, 10);
 
+    // Enrich with product names (batch fetch in parallel)
+    const returnProductIds = topReturned
+      .filter((p) => p.product_id !== "unknown")
+      .map((p) => p.product_id);
+    const returnNamesMap = await this.getProductNames(returnProductIds);
     for (const product of topReturned) {
       if (product.product_id === "unknown") { product.name = "Desconocido"; continue; }
-      try {
-        const productData: any = await this.makeRequest(`/products/${product.product_id}`);
-        if (productData?.data) {
-          product.name = productData.data.name || productData.data.handle || product.product_id;
-        }
-      } catch { /* keep pid as name */ }
+      const info = returnNamesMap.get(product.product_id);
+      product.name = info?.name || `Producto ${product.product_id}`;
     }
 
     const grossSales = Math.abs(totalSalesValue) + totalReturnsValue;

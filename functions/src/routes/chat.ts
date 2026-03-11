@@ -6,9 +6,28 @@ import { GeminiService } from '../services/gemini';
 import { LightspeedClient } from '../services/lightspeed';
 
 const router = express.Router();
-const cache = new CacheService();
-const gemini = new GeminiService();
-const lightspeed = new LightspeedClient(process.env.LIGHTSPEED_PERSONAL_TOKEN || '');
+
+// Lazy initialization — secrets are only available inside the handler at runtime
+let _cache: CacheService | null = null;
+function getCache(): CacheService {
+  if (!_cache) { _cache = new CacheService(); }
+  return _cache;
+}
+
+let _gemini: GeminiService | null = null;
+function getGemini(): GeminiService {
+  if (!_gemini) { _gemini = new GeminiService(); }
+  return _gemini;
+}
+
+let _lightspeed: LightspeedClient | null = null;
+function getLightspeed(): LightspeedClient {
+  if (!_lightspeed) {
+    const token = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
+    _lightspeed = new LightspeedClient(token);
+  }
+  return _lightspeed;
+}
 
 const ChatRequestSchema = z.object({
   question: z.string().min(1).max(500),
@@ -24,10 +43,10 @@ const ChatRequestSchema = z.object({
 async function getRecentSalesData() {
   try {
     // Get outlet info from cache or fetch it
-    let outlets = await cache.get<any[]>('outlets-list');
+    let outlets = await getCache().get<any[]>('outlets-list');
     if (!outlets) {
-      outlets = await lightspeed.listOutlets();
-      await cache.set('outlets-list', outlets, { ttl: 3600 }); // Cache for 1 hour
+      outlets = await getLightspeed().listOutlets();
+      await getCache().set('outlets-list', outlets, { ttl: 3600 }); // Cache for 1 hour
     }
 
     if (!outlets || outlets.length === 0) {
@@ -45,18 +64,18 @@ async function getRecentSalesData() {
 
     // Try to get from cache first
     const cacheKey = `sales-last-30-days-${outletId}`;
-    let salesData = await cache.get(cacheKey);
+    let salesData = await getCache().get(cacheKey);
 
     if (!salesData) {
       // Fetch sales summary and top products
       const [salesSummary, topProducts] = await Promise.all([
-        lightspeed.getSalesSummary(
+        getLightspeed().getSalesSummary(
           dateFrom.toISOString(),
           dateTo.toISOString(),
           outletId,
           true
         ),
-        lightspeed.getTopSellingProducts(
+        getLightspeed().getTopSellingProducts(
           dateFrom.toISOString(),
           dateTo.toISOString(),
           outletId,
@@ -76,7 +95,7 @@ async function getRecentSalesData() {
       };
 
       // Cache for 6 hours
-      await cache.set(cacheKey, salesData, { ttl: 21600 });
+      await getCache().set(cacheKey, salesData, { ttl: 21600 });
     }
 
     return salesData;
@@ -116,7 +135,7 @@ router.post('/ask', async (req: express.Request, res: express.Response) => {
       question: question.substring(0, 100)
     });
 
-    if (!gemini.isConfigured()) {
+    if (!getGemini().isConfigured()) {
       res.status(503).json({
         error: {
           code: 'SERVICE_UNAVAILABLE',
@@ -130,7 +149,8 @@ router.post('/ask', async (req: express.Request, res: express.Response) => {
       return;
     }
 
-    const inventoryContext = await cache.get('inventory-analysis');
+    const outletId = (req.query.outlet_id as string) || '0242e39e-bf6c-11eb-fc6f-29d74e175f8a';
+    const inventoryContext = await getCache().get(`inventory-analysis-${outletId}`);
     const salesContext = await getRecentSalesData();
 
     const fullContext = {
@@ -139,7 +159,7 @@ router.post('/ask', async (req: express.Request, res: express.Response) => {
       sales: salesContext
     };
 
-    const { answer, cost } = await gemini.chat(question, fullContext);
+    const { answer, cost } = await getGemini().chat(question, fullContext);
 
     logger.info('Chat response generated', {
       correlationId,
@@ -170,7 +190,7 @@ router.post('/ask', async (req: express.Request, res: express.Response) => {
     res.status(500).json({
       error: {
         code: 'INTERNAL_ERROR',
-        message: error.message || 'Error al procesar pregunta'
+        message: 'Error interno del servidor'
       },
       meta: {
         timestamp: new Date().toISOString(),

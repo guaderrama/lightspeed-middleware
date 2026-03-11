@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
-import { AlertTriangle, TrendingUp, Package, RefreshCw, Sparkles, Search, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Package, RefreshCw, Search, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
 import { PeriodSelector, getPeriodDates, type Period } from '@/components/PeriodSelector';
@@ -19,7 +19,9 @@ export function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
 
-  const { data, isLoading, error, refetch, isFetching } = useQuery({
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, error, isFetching } = useQuery({
     queryKey: ['inventory-status', outletId],
     queryFn: async () => {
       const response = await apiClient.getInventoryStatus({ outlet_id: outletId });
@@ -27,7 +29,6 @@ export function Dashboard() {
         ...response.data,
         _meta: {
           cached: response.meta?.fromCache ?? false,
-          cacheAge: 0,
         }
       };
     },
@@ -48,7 +49,9 @@ export function Dashboard() {
 
   const handleRefresh = async () => {
     await apiClient.refreshInventoryAnalysis({ outlet_id: outletId });
-    refetch();
+    queryClient.invalidateQueries({ queryKey: ['inventory-status'] });
+    queryClient.invalidateQueries({ queryKey: ['sales-comparison'] });
+    queryClient.invalidateQueries({ queryKey: ['ai-alerts'] });
   };
 
   if (isLoading) {
@@ -77,7 +80,7 @@ export function Dashboard() {
   const recomendaciones = data.recomendaciones ?? [];
   const listas_rapidas = data.listas_rapidas ?? {};
   const resumen_ejecutivo = data.resumen_ejecutivo ?? [];
-  const cacheMeta = data._meta ?? { cached: false, cacheAge: 0 };
+  const cacheMeta = data._meta ?? { cached: false };
 
   // Compute summary stats from metricas
   const totalProductos = metricas.length;
@@ -109,7 +112,7 @@ export function Dashboard() {
             <h1 className="text-3xl font-bold text-gray-900">Dashboard de Inventario</h1>
             <p className="text-gray-500 mt-1">
               {cacheMeta.cached ? (
-                <>Datos en caché • Actualizado hace {Math.round((cacheMeta.cacheAge || 0) / 60)} min</>
+                <>Datos en cache</>
               ) : (
                 <>Datos en tiempo real</>
               )}

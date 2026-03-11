@@ -53,7 +53,7 @@ export function OutletProvider({ children }: { children: ReactNode }) {
       value={{
         outlets,
         selectedOutlet,
-        outletId: selectedId || '1',
+        outletId: selectedId || '',
         setSelectedOutletId: setSelectedId,
         isLoading,
       }}

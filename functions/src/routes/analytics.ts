@@ -7,11 +7,37 @@ import { GeminiService } from '../services/gemini';
 import { InventoryAnalysis } from '../types/analytics';
 
 const router = express.Router();
-const cache = new CacheService();
-const lightspeedToken = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
-const analytics = new AnalyticsService(lightspeedToken);
-const lightspeedClient = new LightspeedClient(lightspeedToken);
-const gemini = new GeminiService();
+
+// Lazy initialization — secrets are only available inside the handler at runtime
+let _cache: CacheService | null = null;
+function getCache(): CacheService {
+  if (!_cache) { _cache = new CacheService(); }
+  return _cache;
+}
+
+let _analytics: AnalyticsService | null = null;
+function getAnalytics(): AnalyticsService {
+  if (!_analytics) {
+    const token = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
+    _analytics = new AnalyticsService(token);
+  }
+  return _analytics;
+}
+
+let _lightspeedClient: LightspeedClient | null = null;
+function getLightspeedClient(): LightspeedClient {
+  if (!_lightspeedClient) {
+    const token = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
+    _lightspeedClient = new LightspeedClient(token);
+  }
+  return _lightspeedClient;
+}
+
+let _gemini: GeminiService | null = null;
+function getGemini(): GeminiService {
+  if (!_gemini) { _gemini = new GeminiService(); }
+  return _gemini;
+}
 
 /**
  * Resolves outlet_id from query params or returns default
@@ -33,13 +59,13 @@ router.get('/inventory-status', async (req: express.Request, res: express.Respon
   try {
     logger.info('Inventory status request', { correlationId, outletId });
 
-    let analysis = await cache.get<InventoryAnalysis>(cacheKey);
+    let analysis = await getCache().get<InventoryAnalysis>(cacheKey);
     const fromCache = !!analysis;
 
     if (!analysis) {
       logger.info('Cache miss - calculating REAL metrics', { correlationId, outletId });
-      analysis = await analytics.calculateMetrics(outletId);
-      await cache.set(cacheKey, analysis, { ttl: 21600 }); // 6h cache
+      analysis = await getAnalytics().calculateMetrics(outletId);
+      await getCache().set(cacheKey, analysis, { ttl: 21600 }); // 6h cache
     }
 
     res.status(200).json({
@@ -54,7 +80,7 @@ router.get('/inventory-status', async (req: express.Request, res: express.Respon
   } catch (error: any) {
     logger.error('Error fetching inventory status', { correlationId, error: error.message });
     res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message || 'Error al obtener estado del inventario' },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -71,9 +97,9 @@ router.post('/refresh', async (req: express.Request, res: express.Response) => {
 
   try {
     logger.info('Force refresh requested', { correlationId, outletId });
-    await cache.delete(cacheKey);
-    const analysis = await analytics.calculateMetrics(outletId);
-    await cache.set(cacheKey, analysis, { ttl: 21600 });
+    await getCache().delete(cacheKey);
+    const analysis = await getAnalytics().calculateMetrics(outletId);
+    await getCache().set(cacheKey, analysis, { ttl: 21600 });
 
     res.status(200).json({
       data: analysis,
@@ -87,7 +113,7 @@ router.post('/refresh', async (req: express.Request, res: express.Response) => {
   } catch (error: any) {
     logger.error('Error refreshing analysis', { correlationId, error: error.message });
     res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message || 'Error al refrescar analisis' },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -105,11 +131,11 @@ router.get('/low-stock', async (req: express.Request, res: express.Response) => 
   try {
     logger.info('Low stock request', { correlationId, outletId });
 
-    let analysis = await cache.get<InventoryAnalysis>(cacheKey);
+    let analysis = await getCache().get<InventoryAnalysis>(cacheKey);
     if (!analysis) {
       logger.info('Cache miss - calculating metrics for low-stock', { correlationId });
-      analysis = await analytics.calculateMetrics(outletId);
-      await cache.set(cacheKey, analysis, { ttl: 21600 });
+      analysis = await getAnalytics().calculateMetrics(outletId);
+      await getCache().set(cacheKey, analysis, { ttl: 21600 });
     }
 
     const lowStockProducts = analysis.metricas.filter(
@@ -126,7 +152,7 @@ router.get('/low-stock', async (req: express.Request, res: express.Response) => 
   } catch (error: any) {
     logger.error('Error fetching low stock', { correlationId, error: error.message });
     res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message || 'Error al obtener productos con stock bajo' },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -140,12 +166,12 @@ router.get('/outlets', async (req: express.Request, res: express.Response) => {
   const correlationId = (req as any).correlationId || 'unknown';
 
   try {
-    let outlets = await cache.get<any[]>('outlets-list');
+    let outlets = await getCache().get<any[]>('outlets-list');
 
     if (!outlets) {
       logger.info('Fetching outlets from Lightspeed', { correlationId });
-      outlets = await lightspeedClient.listOutlets();
-      await cache.set('outlets-list', outlets, { ttl: 3600 });
+      outlets = await getLightspeedClient().listOutlets();
+      await getCache().set('outlets-list', outlets, { ttl: 3600 });
     }
 
     return res.status(200).json({
@@ -155,7 +181,7 @@ router.get('/outlets', async (req: express.Request, res: express.Response) => {
   } catch (error: any) {
     logger.error('Error fetching outlets', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -172,16 +198,16 @@ router.get('/alerts', async (req: express.Request, res: express.Response) => {
 
   try {
     const alertsCacheKey = `ai-alerts-${outletId}`;
-    let alerts = await cache.get<any>(alertsCacheKey);
+    let alerts = await getCache().get<any>(alertsCacheKey);
 
     if (!alerts) {
       logger.info('Generating AI alerts', { correlationId, outletId });
 
       const analysisCacheKey = `inventory-analysis-${outletId}`;
-      let analysis = await cache.get<InventoryAnalysis>(analysisCacheKey);
+      let analysis = await getCache().get<InventoryAnalysis>(analysisCacheKey);
       if (!analysis) {
-        analysis = await analytics.calculateMetrics(outletId);
-        await cache.set(analysisCacheKey, analysis, { ttl: 21600 });
+        analysis = await getAnalytics().calculateMetrics(outletId);
+        await getCache().set(analysisCacheKey, analysis, { ttl: 21600 });
       }
 
       const salesContext = {
@@ -192,12 +218,12 @@ router.get('/alerts', async (req: express.Request, res: express.Response) => {
         slow_moving: analysis.listas_rapidas?.lenta_rotacion?.length ?? 0,
       };
 
-      alerts = await gemini.forecastDemand(salesContext, {
+      alerts = await getGemini().forecastDemand(salesContext, {
         metricas_sample: analysis.metricas.slice(0, 20),
         recomendaciones: analysis.recomendaciones.slice(0, 15),
       });
 
-      await cache.set(alertsCacheKey, alerts, { ttl: 1800 });
+      await getCache().set(alertsCacheKey, alerts, { ttl: 1800 });
     }
 
     return res.status(200).json({
@@ -207,7 +233,7 @@ router.get('/alerts', async (req: express.Request, res: express.Response) => {
   } catch (error: any) {
     logger.error('Error generating alerts', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -233,12 +259,12 @@ router.get('/profit-analysis', async (req: express.Request, res: express.Respons
   const cacheKey = `profit-analysis-${outletId}-${dateFrom}-${dateTo}`;
 
   try {
-    let data = await cache.get<any>(cacheKey);
+    let data = await getCache().get<any>(cacheKey);
 
     if (!data) {
       logger.info('Calculating profit analysis', { correlationId, outletId, dateFrom, dateTo });
-      data = await analytics.getProfitAnalysis(outletId, dateFrom, dateTo);
-      await cache.set(cacheKey, data, { ttl: 7200 }); // 2h cache
+      data = await getAnalytics().getProfitAnalysis(outletId, dateFrom, dateTo);
+      await getCache().set(cacheKey, data, { ttl: 7200 }); // 2h cache
     }
 
     return res.status(200).json({
@@ -248,7 +274,7 @@ router.get('/profit-analysis', async (req: express.Request, res: express.Respons
   } catch (error: any) {
     logger.error('Error in profit-analysis', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -274,12 +300,12 @@ router.get('/category-intelligence', async (req: express.Request, res: express.R
   const cacheKey = `category-intelligence-${outletId}-${dateFrom}-${dateTo}`;
 
   try {
-    let data = await cache.get<any>(cacheKey);
+    let data = await getCache().get<any>(cacheKey);
 
     if (!data) {
       logger.info('Calculating category intelligence', { correlationId, outletId, dateFrom, dateTo });
-      data = await analytics.getCategoryIntelligence(outletId, dateFrom, dateTo);
-      await cache.set(cacheKey, data, { ttl: 7200 }); // 2h cache
+      data = await getAnalytics().getCategoryIntelligence(outletId, dateFrom, dateTo);
+      await getCache().set(cacheKey, data, { ttl: 7200 }); // 2h cache
     }
 
     return res.status(200).json({
@@ -289,7 +315,7 @@ router.get('/category-intelligence', async (req: express.Request, res: express.R
   } catch (error: any) {
     logger.error('Error in category-intelligence', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }

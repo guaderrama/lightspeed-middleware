@@ -56,7 +56,7 @@ export function Chat() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Chat con IA</h1>
         <p className="text-gray-500 mt-1">
-          Pregunta sobre tu inventario • Powered by Gemini 3 Flash
+          Pregunta sobre tu inventario • Powered by Gemini 2.0 Flash
         </p>
       </div>
 

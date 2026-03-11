@@ -2,33 +2,24 @@ import express from 'express';
 import * as logger from 'firebase-functions/logger';
 import { LightspeedClient } from '../services/lightspeed';
 import { CacheService } from '../services/cache';
+import { resolveOutletId } from '../utils/resolve-outlet';
 
 const router = express.Router();
-const cache = new CacheService();
-const lightspeedClient = new LightspeedClient(process.env.LIGHTSPEED_PERSONAL_TOKEN || '');
 
-/**
- * Resolve outlet_id: if not a UUID, fetch first real outlet from Lightspeed
- */
-async function resolveOutletId(outletId: string): Promise<string> {
-  // If it looks like a UUID, use as-is
-  if (outletId.includes('-') && outletId.length > 10) {
-    return outletId;
+// Lazy initialization — secrets are only available inside the handler at runtime
+let _cache: CacheService | null = null;
+function getCache(): CacheService {
+  if (!_cache) { _cache = new CacheService(); }
+  return _cache;
+}
+
+let _lightspeedClient: LightspeedClient | null = null;
+function getLightspeedClient(): LightspeedClient {
+  if (!_lightspeedClient) {
+    const token = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
+    _lightspeedClient = new LightspeedClient(token);
   }
-
-  // Otherwise, resolve to first real outlet
-  let outlets = await cache.get<any[]>('outlets-list');
-  if (!outlets) {
-    outlets = await lightspeedClient.listOutlets();
-    await cache.set('outlets-list', outlets, { ttl: 3600 });
-  }
-
-  if (outlets && outlets.length > 0) {
-    logger.info(`Resolved outlet_id '${outletId}' to '${outlets[0].id}' (${outlets[0].name})`);
-    return outlets[0].id;
-  }
-
-  throw new Error('No outlets found in Lightspeed');
+  return _lightspeedClient;
 }
 
 /**
@@ -48,8 +39,8 @@ router.get('/sales-summary', async (req: express.Request, res: express.Response)
     }
 
     const includeReturns = include_returns !== 'false';
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const rawData = await lightspeedClient.getSalesSummary(
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const rawData = await getLightspeedClient().getSalesSummary(
       date_from as string, date_to as string, resolvedOutletId, includeReturns
     );
 
@@ -60,7 +51,7 @@ router.get('/sales-summary', async (req: express.Request, res: express.Response)
   } catch (error: any) {
     logger.error('Error in sales-summary', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -83,8 +74,8 @@ router.get('/sales-top', async (req: express.Request, res: express.Response) => 
     }
 
     const limitNum = limit ? parseInt(limit as string) : 10;
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const topProducts = await lightspeedClient.getTopSellingProducts(
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const topProducts = await getLightspeedClient().getTopSellingProducts(
       date_from as string, date_to as string, resolvedOutletId, limitNum
     );
 
@@ -95,7 +86,7 @@ router.get('/sales-top', async (req: express.Request, res: express.Response) => 
   } catch (error: any) {
     logger.error('Error in sales-top', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -123,7 +114,9 @@ router.get('/sales-comparison', async (req: express.Request, res: express.Respon
     const currentTo = new Date(date_to);
     const periodLength = currentTo.getTime() - currentFrom.getTime();
 
-    const previousFrom = new Date(currentFrom.getTime() - periodLength);
+    // Ensure minimum 1-day period for comparison (handles same-day ranges like "today")
+    const effectivePeriodLength = Math.max(periodLength, 86400000); // 1 day in ms
+    const previousFrom = new Date(currentFrom.getTime() - effectivePeriodLength);
     const previousTo = new Date(currentFrom.getTime() - 1); // Day before current period
 
     logger.info('Sales comparison request', {
@@ -133,13 +126,13 @@ router.get('/sales-comparison', async (req: express.Request, res: express.Respon
     });
 
     // Resolve outlet ID
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
 
     // Fetch data in parallel
     const [dailySales, currentSummary, previousSummary] = await Promise.all([
-      lightspeedClient.getDailySales(date_from, date_to, resolvedOutletId),
-      lightspeedClient.getSalesSummary(date_from, date_to, resolvedOutletId, true),
-      lightspeedClient.getSalesSummary(
+      getLightspeedClient().getDailySales(date_from, date_to, resolvedOutletId),
+      getLightspeedClient().getSalesSummary(date_from, date_to, resolvedOutletId, true),
+      getLightspeedClient().getSalesSummary(
         previousFrom.toISOString(),
         previousTo.toISOString(),
         resolvedOutletId,
@@ -177,7 +170,7 @@ router.get('/sales-comparison', async (req: express.Request, res: express.Respon
   } catch (error: any) {
     logger.error('Error in sales-comparison', { correlationId, error: error.message, stack: error.stack });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -199,8 +192,8 @@ router.get('/sales-hourly', async (req: express.Request, res: express.Response) 
       });
     }
 
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const data = await lightspeedClient.getHourlySales(date_from, date_to, resolvedOutletId);
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const data = await getLightspeedClient().getHourlySales(date_from, date_to, resolvedOutletId);
 
     return res.status(200).json({
       data,
@@ -209,7 +202,7 @@ router.get('/sales-hourly', async (req: express.Request, res: express.Response) 
   } catch (error: any) {
     logger.error('Error in sales-hourly', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -231,8 +224,8 @@ router.get('/sales-weekday', async (req: express.Request, res: express.Response)
       });
     }
 
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const data = await lightspeedClient.getWeekdaySales(date_from, date_to, resolvedOutletId);
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const data = await getLightspeedClient().getWeekdaySales(date_from, date_to, resolvedOutletId);
 
     return res.status(200).json({
       data,
@@ -241,7 +234,7 @@ router.get('/sales-weekday', async (req: express.Request, res: express.Response)
   } catch (error: any) {
     logger.error('Error in sales-weekday', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -264,8 +257,8 @@ router.get('/sales-category', async (req: express.Request, res: express.Response
     }
 
     const limitNum = limit ? parseInt(limit as string) : 10;
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const data = await lightspeedClient.getCategorySales(date_from, date_to, resolvedOutletId, limitNum);
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const data = await getLightspeedClient().getCategorySales(date_from, date_to, resolvedOutletId, limitNum);
 
     return res.status(200).json({
       data,
@@ -274,7 +267,7 @@ router.get('/sales-category', async (req: express.Request, res: express.Response
   } catch (error: any) {
     logger.error('Error in sales-category', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -296,8 +289,8 @@ router.get('/sales-monthly', async (req: express.Request, res: express.Response)
       });
     }
 
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
-    const data = await lightspeedClient.getMonthlySales(date_from, date_to, resolvedOutletId);
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
+    const data = await getLightspeedClient().getMonthlySales(date_from, date_to, resolvedOutletId);
 
     return res.status(200).json({
       data,
@@ -306,7 +299,7 @@ router.get('/sales-monthly', async (req: express.Request, res: express.Response)
   } catch (error: any) {
     logger.error('Error in sales-monthly', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }
@@ -328,7 +321,7 @@ router.get('/seasonal-comparison', async (req: express.Request, res: express.Res
       });
     }
 
-    const resolvedOutletId = await resolveOutletId(outlet_id as string);
+    const resolvedOutletId = await resolveOutletId(outlet_id as string, getCache(), getLightspeedClient());
 
     // Calculate previous year dates
     const currentFrom = new Date(date_from);
@@ -346,8 +339,8 @@ router.get('/seasonal-comparison', async (req: express.Request, res: express.Res
 
     // Fetch both periods in parallel
     const [currentMonthly, previousMonthly] = await Promise.all([
-      lightspeedClient.getMonthlySales(date_from, date_to, resolvedOutletId),
-      lightspeedClient.getMonthlySales(prevFromStr, prevToStr, resolvedOutletId),
+      getLightspeedClient().getMonthlySales(date_from, date_to, resolvedOutletId),
+      getLightspeedClient().getMonthlySales(prevFromStr, prevToStr, resolvedOutletId),
     ]);
 
     // Build comparison aligned by month
@@ -403,7 +396,7 @@ router.get('/seasonal-comparison', async (req: express.Request, res: express.Res
   } catch (error: any) {
     logger.error('Error in seasonal-comparison', { correlationId, error: error.message });
     return res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: error.message },
+      error: { code: 'INTERNAL_ERROR', message: 'Error interno del servidor' },
       meta: { timestamp: new Date().toISOString(), requestId: correlationId }
     });
   }

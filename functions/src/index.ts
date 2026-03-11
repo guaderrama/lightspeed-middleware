@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import * as logger from "firebase-functions/logger";
 import {onRequest} from "firebase-functions/v2/https";
 import express from "express";
@@ -101,7 +102,10 @@ const requireApiKey = (
   }
 
   const providedKey = authHeader.split(" ")[1];
-  if (providedKey === apiKey) {
+  const providedBuffer = Buffer.from(providedKey);
+  const expectedBuffer = Buffer.from(apiKey);
+  if (providedBuffer.length === expectedBuffer.length &&
+      crypto.timingSafeEqual(providedBuffer, expectedBuffer)) {
     return next();
   } else {
     logger.warn("Invalid API Key", { correlationId });

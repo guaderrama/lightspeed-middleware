@@ -4,11 +4,29 @@ import { AnalyticsService } from '../services/analytics';
 import { CacheService } from '../services/cache';
 import { GeminiService } from '../services/gemini';
 
-const lightspeedToken = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
-const analytics = new AnalyticsService(lightspeedToken);
-const cache = new CacheService();
-const gemini = new GeminiService();
 const DEFAULT_OUTLET_ID = '0242e39e-bf6c-11eb-fc6f-29d74e175f8a';
+
+// Lazy initialization — secrets are only available inside the handler at runtime
+let _analytics: AnalyticsService | null = null;
+function getAnalytics(): AnalyticsService {
+  if (!_analytics) {
+    const token = process.env.LIGHTSPEED_PERSONAL_TOKEN || '';
+    _analytics = new AnalyticsService(token);
+  }
+  return _analytics;
+}
+
+let _cache: CacheService | null = null;
+function getCache(): CacheService {
+  if (!_cache) { _cache = new CacheService(); }
+  return _cache;
+}
+
+let _gemini: GeminiService | null = null;
+function getGemini(): GeminiService {
+  if (!_gemini) { _gemini = new GeminiService(); }
+  return _gemini;
+}
 
 /**
  * Background job que se ejecuta cada 6 horas
@@ -24,7 +42,7 @@ export const analyzeInventoryJob = onSchedule({
   try {
     // 1. Calcular métricas
     logger.info('Calculating inventory metrics');
-    const analysis = await analytics.calculateMetrics(DEFAULT_OUTLET_ID);
+    const analysis = await getAnalytics().calculateMetrics(DEFAULT_OUTLET_ID);
 
     // 2. Detectar problemas críticos
     const criticalCount = analysis.recomendaciones.filter(
@@ -38,13 +56,13 @@ export const analyzeInventoryJob = onSchedule({
     });
 
     // 3. Si hay problemas críticos nuevos, usar Gemini para análisis profundo
-    if (criticalCount > 0 && gemini.isConfigured()) {
+    if (criticalCount > 0 && getGemini().isConfigured()) {
       logger.info('Critical issues detected, calling Gemini AI', {
         count: criticalCount
       });
 
       try {
-        const aiInsights = await gemini.analyzeInventory(analysis);
+        const aiInsights = await getGemini().analyzeInventory(analysis);
         analysis.aiInsights = aiInsights;
 
         logger.info('Gemini analysis completed successfully');
@@ -57,7 +75,7 @@ export const analyzeInventoryJob = onSchedule({
     }
 
     // 4. Guardar en caché
-    await cache.set(`inventory-analysis-${DEFAULT_OUTLET_ID}`, analysis, { ttl: 21600 });  // 6 horas
+    await getCache().set(`inventory-analysis-${DEFAULT_OUTLET_ID}`, analysis, { ttl: 21600 });  // 6 horas
 
     logger.info('Inventory analysis completed and cached successfully', {
       expiresIn: '6 hours'

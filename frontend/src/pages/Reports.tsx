@@ -24,7 +24,7 @@ export function Reports() {
 
   // Sales Summary
   const { data: salesSummary, isLoading: loadingSummary } = useQuery({
-    queryKey: ['sales-summary', periodDates.from, periodDates.to],
+    queryKey: ['sales-summary', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getSalesSummary({ ...queryParams, include_returns: true });
       return response.data;
@@ -33,7 +33,7 @@ export function Reports() {
 
   // Sales Comparison (for % change)
   const { data: salesComparison } = useQuery({
-    queryKey: ['sales-comparison-reports', periodDates.from, periodDates.to],
+    queryKey: ['sales-comparison-reports', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getSalesComparison(queryParams);
       return response.data;
@@ -42,7 +42,7 @@ export function Reports() {
 
   // Top Products
   const { data: topProducts, isLoading: loadingTop } = useQuery({
-    queryKey: ['top-products', periodDates.from, periodDates.to],
+    queryKey: ['top-products', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getTopSellingProducts({ ...queryParams, limit: 10 });
       return response.data;
@@ -51,7 +51,7 @@ export function Reports() {
 
   // Hourly Sales
   const { data: hourlySales, isLoading: loadingHourly } = useQuery({
-    queryKey: ['hourly-sales', periodDates.from, periodDates.to],
+    queryKey: ['hourly-sales', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getHourlySales(queryParams);
       return response.data;
@@ -60,7 +60,7 @@ export function Reports() {
 
   // Weekday Sales
   const { data: weekdaySales, isLoading: loadingWeekday } = useQuery({
-    queryKey: ['weekday-sales', periodDates.from, periodDates.to],
+    queryKey: ['weekday-sales', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getWeekdaySales(queryParams);
       return response.data;
@@ -69,7 +69,7 @@ export function Reports() {
 
   // Category Sales
   const { data: categorySales, isLoading: loadingCategory } = useQuery({
-    queryKey: ['category-sales', periodDates.from, periodDates.to],
+    queryKey: ['category-sales', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getCategorySales(queryParams);
       return response.data;
@@ -78,7 +78,7 @@ export function Reports() {
 
   // Monthly Sales
   const { data: monthlySales, isLoading: loadingMonthly } = useQuery({
-    queryKey: ['monthly-sales', periodDates.from, periodDates.to],
+    queryKey: ['monthly-sales', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getMonthlySales(queryParams);
       return response.data;
@@ -87,7 +87,7 @@ export function Reports() {
 
   // Seasonal Comparison (Year-over-Year)
   const { data: seasonalData, isLoading: loadingSeasonal } = useQuery({
-    queryKey: ['seasonal-comparison', periodDates.from, periodDates.to],
+    queryKey: ['seasonal-comparison', periodDates.from, periodDates.to, outletId],
     queryFn: async () => {
       const response = await apiClient.getSeasonalComparison(queryParams);
       return response.data;

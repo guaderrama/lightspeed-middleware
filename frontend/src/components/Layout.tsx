@@ -52,7 +52,7 @@ export function Layout() {
         <div className="border-t border-gray-200 p-4">
           <div className="text-xs text-gray-500">
             <p className="font-medium">Lightspeed Middleware</p>
-            <p className="mt-1">v2.0.0 • Powered by Gemini 3 Flash</p>
+            <p className="mt-1">v2.0.0 • Powered by Gemini 2.0 Flash</p>
           </div>
         </div>
       </div>

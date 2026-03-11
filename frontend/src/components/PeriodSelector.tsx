@@ -68,6 +68,18 @@ export function PeriodSelector({ value, onChange, customFrom, customTo, onCustom
 }
 
 /**
+ * Format a Date as YYYY-MM-DD in the user's local timezone.
+ * Using toISOString() would convert to UTC which shifts dates
+ * for negative-offset timezones (e.g. America/Mazatlan UTC-7).
+ */
+function formatLocalDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
  * Helper function to calculate date range based on period
  */
 export function getPeriodDates(period: Period, customFrom?: string, customTo?: string): { from: string; to: string } {
@@ -76,13 +88,17 @@ export function getPeriodDates(period: Period, customFrom?: string, customTo?: s
   }
 
   const today = new Date();
-  const to = today.toISOString().split('T')[0];
+  const to = formatLocalDate(today);
   let from: Date;
 
   switch (period) {
-    case 'today':
+    case 'today': {
       from = new Date(today);
-      break;
+      // Use tomorrow as date_to so the API range covers the full day
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return { from: formatLocalDate(from), to: formatLocalDate(tomorrow) };
+    }
     case 'week':
       from = new Date(today);
       from.setDate(today.getDate() - 7);
@@ -102,7 +118,7 @@ export function getPeriodDates(period: Period, customFrom?: string, customTo?: s
   }
 
   return {
-    from: from.toISOString().split('T')[0],
+    from: formatLocalDate(from),
     to,
   };
 }
