@@ -324,7 +324,7 @@ export function Profitability() {
                     </td>
                     <td className="px-3 py-2 text-sm text-gray-500 text-right">${cat.inventory_value.toLocaleString()}</td>
                     <td className="px-3 py-2 text-sm text-center text-gray-500">
-                      {cat.abc_distribution.A}/{cat.abc_distribution.B}/{cat.abc_distribution.C}
+                      {cat.abc_distribution?.A ?? 0}/{cat.abc_distribution?.B ?? 0}/{cat.abc_distribution?.C ?? 0}
                     </td>
                     <td className="px-3 py-2 text-sm text-gray-500 max-w-[160px] truncate">
                       {cat.top_product.name || '-'}

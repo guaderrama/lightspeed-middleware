@@ -49,7 +49,7 @@ export function Dashboard() {
 
   const handleRefresh = async () => {
     await apiClient.refreshInventoryAnalysis({ outlet_id: outletId });
-    queryClient.invalidateQueries({ queryKey: ['inventory-status'] });
+    queryClient.invalidateQueries({ queryKey: ['inventory-status', outletId] });
     queryClient.invalidateQueries({ queryKey: ['sales-comparison'] });
     queryClient.invalidateQueries({ queryKey: ['ai-alerts'] });
   };

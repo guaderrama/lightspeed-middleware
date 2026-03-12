@@ -32,9 +32,11 @@ export function OutletProvider({ children }: { children: ReactNode }) {
     staleTime: 1000 * 60 * 60, // 1 hour
   });
 
-  // Auto-select first outlet if none selected
+  // Auto-select first outlet if none selected or saved selection no longer exists
   useEffect(() => {
-    if (!selectedId && outlets.length > 0) {
+    if (outlets.length === 0) return;
+    const exists = outlets.some((o) => o.id === selectedId);
+    if (!selectedId || !exists) {
       setSelectedId(outlets[0].id);
     }
   }, [outlets, selectedId]);

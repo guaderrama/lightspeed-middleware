@@ -322,7 +322,7 @@ export class AnalyticsService {
 
     for (const [productId, sales] of salesMap.entries()) {
       const metric = metricsMap.get(productId);
-      if (!metric || sales.quantity_sold <= 0) continue;
+      if (!metric || !sales || sales.quantity_sold <= 0) continue;
 
       const costo = metric.costo;
       const precio = metric.precio;
@@ -409,8 +409,13 @@ export class AnalyticsService {
       { range: '80-100%', min: 80, max: 100, count: 0, total_profit: 0 },
     ];
     for (const pp of withCostData) {
-      const bucket = buckets.find((b) => pp.margin_pct >= b.min && pp.margin_pct < b.max)
-        || buckets[buckets.length - 1];
+      // Last bucket uses <= to capture exactly 100% margin; clamp negatives to first bucket
+      const clampedMargin = Math.max(0, pp.margin_pct);
+      const bucket = buckets.find((b, i) =>
+        i === buckets.length - 1
+          ? clampedMargin >= b.min
+          : clampedMargin >= b.min && clampedMargin < b.max
+      ) || buckets[buckets.length - 1];
       bucket.count++;
       bucket.total_profit += pp.total_profit;
     }

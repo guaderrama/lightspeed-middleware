@@ -66,7 +66,12 @@ export class CacheService {
         return null;
       }
 
-      // Verificar expiración
+      // Verificar expiración — guard against corrupted/non-Timestamp value
+      if (!data.expiresAt || typeof data.expiresAt.toDate !== 'function') {
+        logger.warn('Cache entry has invalid expiresAt, treating as expired', { key });
+        await this.delete(key);
+        return null;
+      }
       const expiresAt = data.expiresAt.toDate();
       const now = new Date();
 

@@ -109,9 +109,21 @@ router.get('/sales-comparison', async (req: express.Request, res: express.Respon
       });
     }
 
-    // Calculate previous period dates
+    // Validate date format and range
     const currentFrom = new Date(date_from);
     const currentTo = new Date(date_to);
+    if (isNaN(currentFrom.getTime()) || isNaN(currentTo.getTime())) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid date format. Use YYYY-MM-DD.' },
+        meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+      });
+    }
+    if (currentFrom > currentTo) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'date_from must be before or equal to date_to.' },
+        meta: { timestamp: new Date().toISOString(), requestId: correlationId }
+      });
+    }
     const periodLength = currentTo.getTime() - currentFrom.getTime();
 
     // Ensure minimum 1-day period for comparison (handles same-day ranges like "today")

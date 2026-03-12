@@ -32,7 +32,7 @@ export function exportMultiSheet(
   const wb = XLSX.utils.book_new();
 
   for (const sheet of sheets) {
-    if (sheet.data.length === 0) continue;
+    if (!sheet.data || sheet.data.length === 0) continue;
     const ws = XLSX.utils.json_to_sheet(sheet.data);
     const colWidths = Object.keys(sheet.data[0]).map((key) => {
       const maxLen = Math.max(
