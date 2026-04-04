@@ -66,6 +66,38 @@ export class LightspeedClient {
     return `${year}-${month}`;
   }
 
+  /**
+   * Lightspeed API's date_to is EXCLUSIVE — a query with date_from=Apr 3 and
+   * date_to=Apr 3 returns ZERO results. To include the full last day we must
+   * add +1 day to date_to before sending to the API.
+   */
+  private makeInclusiveDateTo(dateTo: string): string {
+    const d = new Date(dateTo.substring(0, 10) + 'T12:00:00'); // noon avoids DST edge
+    d.setDate(d.getDate() + 1);
+    return this.formatLocalDate(d);
+  }
+
+  /**
+   * Expand date_from by -1 day to account for UTC→Mazatlan offset.
+   * Sales from late evening Mazatlan fall on the NEXT UTC day.
+   * By fetching 1 extra day of data, we ensure no local-date sales are missed.
+   */
+  private expandDateFromForTimezone(dateFrom: string): string {
+    const d = new Date(dateFrom.substring(0, 10) + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    return this.formatLocalDate(d);
+  }
+
+  /**
+   * Check if a sale's LOCAL date falls within the requested local date range.
+   * Used to filter out sales that bleed across UTC day boundaries.
+   */
+  private isSaleInLocalDateRange(saleDateUtc: string, localFrom: string, localTo: string): boolean {
+    const localDate = this.toLocalDate(saleDateUtc);
+    const localDateStr = this.formatLocalDate(localDate);
+    return localDateStr >= localFrom && localDateStr <= localTo;
+  }
+
   private async makeRequest<T>(endpoint: string, params?: URLSearchParams): Promise<T> {
     const url = `${this.baseUrl}${endpoint}${params ? '?' + params.toString() : ''}`;
     functions.logger.info(`Lightspeed API request: ${endpoint}`);
@@ -155,6 +187,8 @@ export class LightspeedClient {
     outletId: string,
     includeReturns: boolean = true,
   ): Promise<SalesSummary> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     let totalAmount = 0;
     let totalTickets = 0;
     let hasMore = true;
@@ -165,8 +199,8 @@ export class LightspeedClient {
       const params = new URLSearchParams({
         type: "sales",
         outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10),
-        date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom),
+        date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(),
         status: "CLOSED",
       });
@@ -183,8 +217,10 @@ export class LightspeedClient {
       }
 
       for (const sale of data.data) {
-        // X-Series: sales are flat objects, status CLOSED = completed
         if (sale.status === "CLOSED") {
+          const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
+
           totalTickets++;
           let saleTotal = sale.total_price || 0;
 
@@ -240,6 +276,8 @@ export class LightspeedClient {
     outletId: string,
     limit: number = 10,
   ): Promise<any[]> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const productSales: { [key: string]: { quantity: number; revenue: number } } = {};
     let hasMore = true;
     let afterCursor: string | null = null;
@@ -249,8 +287,8 @@ export class LightspeedClient {
       const params = new URLSearchParams({
         type: "sales",
         outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10),
-        date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom),
+        date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(),
         status: "CLOSED",
       });
@@ -268,6 +306,8 @@ export class LightspeedClient {
 
       for (const sale of data.data) {
         if (sale.status === "CLOSED" && sale.line_items) {
+          const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
           for (const line of sale.line_items) {
             if (line.product_id && line.quantity > 0 && !line.is_return) {
               const pid = line.product_id;
@@ -344,6 +384,8 @@ export class LightspeedClient {
     dateTo: string,
     outletId: string,
   ): Promise<{ date: string; amount: number; tickets: number }[]> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const dailySales: { [key: string]: { amount: number; tickets: number } } = {};
     let hasMore = true;
     let afterCursor: string | null = null;
@@ -353,8 +395,8 @@ export class LightspeedClient {
       const params = new URLSearchParams({
         type: "sales",
         outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10),
-        date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom),
+        date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(),
         status: "CLOSED",
       });
@@ -373,6 +415,7 @@ export class LightspeedClient {
       for (const sale of data.data) {
         if (sale.status === "CLOSED") {
           const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
           if (saleDate) {
             const localDate = this.toLocalDate(saleDate);
             const date = this.formatLocalDate(localDate);
@@ -412,6 +455,8 @@ export class LightspeedClient {
     dateTo: string,
     outletId: string,
   ): Promise<{ hour: number; amount: number; tickets: number }[]> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const hourlySales: { [key: number]: { amount: number; tickets: number } } = {};
     for (let i = 0; i < 24; i++) hourlySales[i] = { amount: 0, tickets: 0 };
 
@@ -422,7 +467,7 @@ export class LightspeedClient {
     while (hasMore) {
       const params = new URLSearchParams({
         type: "sales", outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom), date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(), status: "CLOSED",
       });
       if (afterCursor) params.set("after", afterCursor);
@@ -433,6 +478,7 @@ export class LightspeedClient {
       for (const sale of data.data) {
         if (sale.status === "CLOSED") {
           const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
           if (saleDate) {
             const localDate = this.toLocalDate(saleDate);
             const hour = localDate.getHours();
@@ -463,6 +509,8 @@ export class LightspeedClient {
     dateTo: string,
     outletId: string,
   ): Promise<{ day: number; dayName: string; amount: number; tickets: number }[]> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const dayNames = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
     const weekdaySales: { [key: number]: { amount: number; tickets: number } } = {};
     for (let i = 0; i < 7; i++) weekdaySales[i] = { amount: 0, tickets: 0 };
@@ -474,7 +522,7 @@ export class LightspeedClient {
     while (hasMore) {
       const params = new URLSearchParams({
         type: "sales", outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom), date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(), status: "CLOSED",
       });
       if (afterCursor) params.set("after", afterCursor);
@@ -485,6 +533,7 @@ export class LightspeedClient {
       for (const sale of data.data) {
         if (sale.status === "CLOSED") {
           const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
           if (saleDate) {
             const localDate = this.toLocalDate(saleDate);
             const dayOfWeek = localDate.getDay();
@@ -517,6 +566,8 @@ export class LightspeedClient {
     outletId: string,
     limit: number = 10,
   ): Promise<{ name: string; quantity: number; revenue: number; variants: number }[]> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const productSales: { [key: string]: { quantity: number; revenue: number } } = {};
     let hasMore = true;
     let afterCursor: string | null = null;
@@ -525,7 +576,7 @@ export class LightspeedClient {
     while (hasMore) {
       const params = new URLSearchParams({
         type: "sales", outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom), date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(), status: "CLOSED",
       });
       if (afterCursor) params.set("after", afterCursor);
@@ -535,6 +586,8 @@ export class LightspeedClient {
 
       for (const sale of data.data) {
         if (sale.status === "CLOSED" && sale.line_items) {
+          const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
           for (const line of sale.line_items) {
             if (line.product_id && line.quantity > 0 && !line.is_return) {
               const pid = line.product_id;
@@ -596,6 +649,8 @@ export class LightspeedClient {
     dateTo: string,
     outletId: string,
   ): Promise<{ month: string; amount: number; tickets: number; avg_ticket: number }[]> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const monthlySales: { [key: string]: { amount: number; tickets: number } } = {};
     let hasMore = true;
     let afterCursor: string | null = null;
@@ -604,7 +659,7 @@ export class LightspeedClient {
     while (hasMore) {
       const params = new URLSearchParams({
         type: "sales", outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom), date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(), status: "CLOSED",
       });
       if (afterCursor) params.set("after", afterCursor);
@@ -615,6 +670,7 @@ export class LightspeedClient {
       for (const sale of data.data) {
         if (sale.status === "CLOSED") {
           const saleDate = sale.sale_date || sale.created_at;
+          if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
           if (saleDate) {
             const localDate = this.toLocalDate(saleDate);
             const month = this.formatLocalMonth(localDate);
@@ -663,6 +719,8 @@ export class LightspeedClient {
       last_purchase: string;
     }[];
   }> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const customers: { [id: string]: {
       name: string;
       total_spent: number;
@@ -677,7 +735,7 @@ export class LightspeedClient {
     while (hasMore) {
       const params = new URLSearchParams({
         type: "sales", outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom), date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(), status: "CLOSED",
       });
       if (afterCursor) params.set("after", afterCursor);
@@ -687,9 +745,10 @@ export class LightspeedClient {
 
       for (const sale of data.data) {
         if (sale.status !== "CLOSED") continue;
+        const saleDate = sale.sale_date || sale.created_at || "";
+        if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
         const customerId = sale.customer_id || "anonymous";
         const customerName = sale.customer_name || "Cliente Sin Nombre";
-        const saleDate = sale.sale_date || sale.created_at || "";
         const amount = sale.total_price || 0;
 
         if (!customers[customerId]) {
@@ -897,6 +956,8 @@ export class LightspeedClient {
     dateTo: string,
     outletId: string,
   ): Promise<Map<string, { quantity_sold: number; revenue: number; last_sale_date: string }>> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const salesMap = new Map<string, { quantity_sold: number; revenue: number; last_sale_date: string }>();
     let hasMore = true;
     let afterCursor: string | null = null;
@@ -905,7 +966,7 @@ export class LightspeedClient {
     while (hasMore) {
       const params = new URLSearchParams({
         type: "sales", outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom), date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(), status: "CLOSED",
       });
       if (afterCursor) params.set("after", afterCursor);
@@ -916,6 +977,7 @@ export class LightspeedClient {
       for (const sale of data.data) {
         if (sale.status !== "CLOSED" || !sale.line_items) continue;
         const saleDate = sale.sale_date || sale.created_at || "";
+        if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
 
         for (const line of sale.line_items) {
           if (!line.product_id || line.is_return || line.quantity <= 0) continue;
@@ -961,6 +1023,8 @@ export class LightspeedClient {
     return_rate_count: number;
     top_returned_products: { product_id: string; name: string; quantity: number; value: number }[];
   }> {
+    const localFrom = dateFrom.substring(0, 10);
+    const localTo = dateTo.substring(0, 10);
     const returnedProducts: { [pid: string]: { quantity: number; value: number } } = {};
     let totalReturnsValue = 0;
     let totalReturnsCount = 0;
@@ -973,7 +1037,7 @@ export class LightspeedClient {
     while (hasMore) {
       const params = new URLSearchParams({
         type: "sales", outlet_id: outletId,
-        date_from: dateFrom.substring(0, 10), date_to: dateTo.substring(0, 10),
+        date_from: this.expandDateFromForTimezone(dateFrom), date_to: this.makeInclusiveDateTo(dateTo),
         limit: pageSize.toString(), status: "CLOSED",
       });
       if (afterCursor) params.set("after", afterCursor);
@@ -983,6 +1047,8 @@ export class LightspeedClient {
 
       for (const sale of data.data) {
         if (sale.status !== "CLOSED") continue;
+        const saleDate = sale.sale_date || sale.created_at;
+        if (saleDate && !this.isSaleInLocalDateRange(saleDate, localFrom, localTo)) continue;
         totalSalesValue += sale.total_price || 0;
         totalSalesCount += 1;
 
